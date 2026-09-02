@@ -90,11 +90,13 @@
   .modal .save{background:var(--accent);color:#fff;}
   .modal .cancel{background:var(--panel2);color:var(--text);border:1px solid var(--border) !important;}
   .empty{padding:40px;text-align:center;color:var(--dim);}
+  thead th[data-sort]{cursor:pointer;user-select:none;}
+  thead th[data-sort]:hover{color:var(--text);}
   #progressWrap{display:none;height:4px;background:var(--panel2);border-radius:2px;overflow:hidden;margin-bottom:10px;}
   #progressWrap.on{display:block;}
   #progressBar{height:100%;background:var(--cyan);width:0%;transition:width .2s;}
   @media (max-width:640px){
-    thead th:nth-child(2),tbody td:nth-child(2){display:none;}
+    thead th:nth-child(3),tbody td:nth-child(3){display:none;}
     #chartWrap{height:340px;}
     .icon-btn{padding:10px 12px;font-size:15px;}
     .chart-controls{width:100%;}
@@ -122,6 +124,16 @@
       </select>
     </label>
     <label><input type="checkbox" id="hitsOnly"> Hits only</label>
+    <label><input type="checkbox" id="autoRefresh"> Auto-refresh
+      <select id="autoRefreshInterval">
+        <option value="1">1m</option>
+        <option value="2">2m</option>
+        <option value="5" selected>5m</option>
+        <option value="15">15m</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="notifyOnHits"> Notify on hits</label>
+    <button class="secondary" id="exportCsvBtn">⬇ CSV</button>
     <span id="status">Not connected</span>
   </div>
   <div id="progressWrap"><div id="progressBar"></div></div>
@@ -131,17 +143,18 @@
       <table>
         <thead>
           <tr>
-            <th>Symbol</th>
-            <th>Price</th>
+            <th data-sort="symbol">Symbol</th>
+            <th data-sort="price">Price</th>
+            <th data-sort="chg">Chg%</th>
             <th>EMA5&gt;13</th>
             <th>EMA13&gt;34</th>
             <th>Bullish</th>
             <th>MagicTrend</th>
-            <th>Signal</th>
+            <th data-sort="match">Signal</th>
           </tr>
         </thead>
         <tbody id="tbody">
-          <tr><td colspan="7" class="empty">Set your Alpaca keys in Settings, then Run Scan.</td></tr>
+          <tr><td colspan="8" class="empty">Set your Alpaca keys in Settings, then Run Scan.</td></tr>
         </tbody>
       </table>
     </aside>
@@ -249,6 +262,34 @@ function loadCfg(){
 }
 function saveCfg(cfg){ localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }
 
+// Bar cache: lets a re-scan fetch only the bars newer than what we already
+// have (instead of re-downloading the whole lookback window every time), and
+// lets the app repaint instantly from last session's data before the network
+// even responds. Keyed off feed+timeframe since bar granularity/session
+// differs between them - switching either starts the cache fresh.
+const BAR_CACHE_KEY = "ripster_screener_barcache_v1";
+function loadBarCache(){
+  try{
+    const raw = JSON.parse(localStorage.getItem(BAR_CACHE_KEY));
+    if(raw && raw.feed === cfg.feed && raw.timeframe === cfg.timeframe && raw.bars) return raw;
+  }catch(e){}
+  return { feed: cfg.feed, timeframe: cfg.timeframe, bars: {} };
+}
+function saveBarCache(cache){
+  try{ localStorage.setItem(BAR_CACHE_KEY, JSON.stringify(cache)); }
+  catch(e){ /* quota exceeded or storage disabled - caching is best-effort */ }
+}
+function mergeBars(oldBars, newBars){
+  const map = new Map();
+  for(const b of oldBars) map.set(b.t, b);
+  for(const b of newBars) map.set(b.t, b);
+  return Array.from(map.values()).sort((a,b)=> new Date(a.t) - new Date(b.t));
+}
+function trimBarsToRange(bars, startIso){
+  const startMs = new Date(startIso).getTime();
+  return bars.filter(b => new Date(b.t).getTime() >= startMs);
+}
+
 const DEFAULT_PARAMS = {
   cciPeriod: 20, atrPeriodMT: 5, atrMultMT: 1,
   bullFastEma: 10, bullSlowEma: 21, rsiPeriod: 14, rsiThreshold: 50, cloudAtrFactor: 0.3
@@ -259,9 +300,12 @@ let cfg = Object.assign({
   apiKey: "", apiSecret: "", feed: "iex", timeframe: "4Hour",
   watchlist: "AAPL,MSFT,NVDA,AMD,TSLA,AMZN,GOOGL,META,AVGO,NFLX,CRM,ORCL,COST,PANW,SHOP,UBER,PLTR,SMCI,MU,QCOM",
   matchMode: "all",
+  autoRefresh: false, autoRefreshMinutes: 5, notifyOnHits: false,
   conditions: Object.assign({}, DEFAULT_CONDITIONS),
   params: Object.assign({}, DEFAULT_PARAMS)
 }, loadCfg());
+
+let barCache = loadBarCache();
 
 const els = id => document.getElementById(id);
 const settingsModal = els("settingsModal");
@@ -559,8 +603,11 @@ function isMatchAtBar(ind, i){
 function screenerFlags(ind){
   const i = ind.bars.length - 1;
   if(i < 0) return null;
+  const prevClose = i > 0 ? ind.bars[i-1].c : ind.bars[i].c;
+  const chg = prevClose ? ((ind.bars[i].c - prevClose) / prevClose) * 100 : 0;
   return {
     price: ind.bars[i].c,
+    chg,
     ema5gt13: ind.ema5[i] > ind.ema13[i],
     ema13gt34: ind.ema13[i] > ind.ema34[i],
     bullish: ind.bullish[i],
@@ -570,13 +617,51 @@ function screenerFlags(ind){
 
 let results = {};
 let selectedSymbol = null;
+let sortKey = "symbol";
+let sortDir = 1; // 1 = ascending, -1 = descending
+
+function matchScore(f){
+  return [f.ema5gt13, f.ema13gt34, f.bullish, f.magicGreen].filter(Boolean).length;
+}
+
+function sortSymbols(symbols){
+  return symbols.slice().sort((a,b)=>{
+    const fa = results[a] && results[a].flags;
+    const fb = results[b] && results[b].flags;
+    let va, vb;
+    if(sortKey === "price"){ va = fa ? fa.price : -Infinity; vb = fb ? fb.price : -Infinity; }
+    else if(sortKey === "chg"){ va = fa ? fa.chg : -Infinity; vb = fb ? fb.chg : -Infinity; }
+    else if(sortKey === "match"){ va = fa ? matchScore(fa) : -1; vb = fb ? matchScore(fb) : -1; }
+    else { va = a; vb = b; }
+    if(va < vb) return -1 * sortDir;
+    if(va > vb) return 1 * sortDir;
+    return a.localeCompare(b);
+  });
+}
+
+function updateSortIndicators(){
+  document.querySelectorAll("th[data-sort]").forEach(th=>{
+    const key = th.getAttribute("data-sort");
+    const label = th.getAttribute("data-label") || th.textContent.replace(/[▲▼]\s*$/,"").trim();
+    th.setAttribute("data-label", label);
+    th.textContent = label + (key === sortKey ? (sortDir === 1 ? " ▲" : " ▼") : "");
+  });
+}
+document.querySelectorAll("th[data-sort]").forEach(th=>{
+  th.onclick = ()=>{
+    const key = th.getAttribute("data-sort");
+    if(sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = 1; }
+    renderTable();
+  };
+});
 
 function renderTable(){
   const tbody = els("tbody");
   const hitsOnly = els("hitsOnly").checked;
-  const symbols = Object.keys(results).sort();
+  updateSortIndicators();
+  const symbols = sortSymbols(Object.keys(results));
   if(!symbols.length){
-    tbody.innerHTML = `<tr><td colspan="7" class="empty">No results yet. Click Run Scan.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="empty">No results yet. Click Run Scan.</td></tr>`;
     return;
   }
   let rows = "";
@@ -586,9 +671,12 @@ function renderTable(){
     const f = r.flags;
     const isFullMatch = matchFromFlags(f);
     if(hitsOnly && !isFullMatch) continue;
+    const chgColor = f.chg > 0 ? "var(--green)" : (f.chg < 0 ? "var(--red)" : "var(--dim)");
+    const chgSign = f.chg > 0 ? "+" : "";
     rows += `<tr data-sym="${sym}" class="${sym===selectedSymbol?'selected':''}">
       <td class="sym">${sym}</td>
       <td>${f.price.toFixed(2)}</td>
+      <td style="color:${chgColor}">${chgSign}${f.chg.toFixed(2)}%</td>
       <td><span class="dot ${f.ema5gt13?'g':'r'}"></span></td>
       <td><span class="dot ${f.ema13gt34?'g':'r'}"></span></td>
       <td><span class="dot ${f.bullish?'g':'r'}"></span></td>
@@ -596,37 +684,124 @@ function renderTable(){
       <td>${isFullMatch ? '<span class="pill match">MATCH</span>' : '<span class="pill r">no</span>'}</td>
     </tr>`;
   }
-  tbody.innerHTML = rows || `<tr><td colspan="7" class="empty">No hits.</td></tr>`;
+  tbody.innerHTML = rows || `<tr><td colspan="8" class="empty">No hits.</td></tr>`;
   tbody.querySelectorAll("tr[data-sym]").forEach(tr=>{
     tr.onclick = ()=> selectSymbol(tr.getAttribute("data-sym"));
   });
 }
 els("hitsOnly").onchange = renderTable;
 
-async function runScan(){
-  if(!cfg.apiKey || !cfg.apiSecret){ openSettings(); return; }
+function exportCsv(){
+  const hitsOnly = els("hitsOnly").checked;
+  const symbols = sortSymbols(Object.keys(results));
+  const rows = [["Symbol","Price","Chg%","EMA5>13","EMA13>34","Bullish","MagicTrend","Match"]];
+  for(const sym of symbols){
+    const r = results[sym];
+    if(!r || !r.flags) continue;
+    const f = r.flags;
+    const isMatch = matchFromFlags(f);
+    if(hitsOnly && !isMatch) continue;
+    rows.push([sym, f.price.toFixed(2), f.chg.toFixed(2), f.ema5gt13, f.ema13gt34, f.bullish, f.magicGreen, isMatch]);
+  }
+  const csv = rows.map(r => r.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `ripster_scan_${new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+els("exportCsvBtn").onclick = exportCsv;
+
+async function runScan(opts){
+  opts = opts || {};
+  const silent = !!opts.silent;
+  if(!cfg.apiKey || !cfg.apiSecret){ if(!silent) openSettings(); return; }
   const symbols = parseWatchlist();
   if(!symbols.length) return;
   const timeframe = cfg.timeframe;
-  els("scanBtn").disabled = true;
-  els("progressWrap").classList.add("on");
-  els("progressBar").style.width = "2%";
-  els("status").textContent = "Fetching bars…";
+
+  // A cache built under a different feed/timeframe doesn't apply here -
+  // start clean rather than mixing bar granularities.
+  if(barCache.feed !== cfg.feed || barCache.timeframe !== timeframe){
+    barCache = { feed: cfg.feed, timeframe, bars: {} };
+  }
+
+  if(!silent){
+    els("scanBtn").disabled = true;
+    els("progressWrap").classList.add("on");
+    els("progressBar").style.width = "2%";
+  }
+  els("status").textContent = silent ? "Refreshing…" : "Fetching bars…";
+
   try{
     const { start, end } = dateRangeFor(timeframe);
-    const barsMap = await fetchMultiBars(symbols, start, end, timeframe, (done,total)=>{
-      const pct = Math.round((done/total)*100);
-      els("progressBar").style.width = pct+"%";
-      els("status").textContent = `Fetched ${done}/${total} symbols…`;
-    });
+    const total = symbols.length;
+    let doneCount = 0;
+    // fetchMultiBars reports progress as a cumulative count *within its own
+    // call* (per 60-symbol chunk), so each call needs its own local
+    // baseline to turn that into a running total across the full scan.
+    function makeProgressHandler(){
+      let prevInCall = 0;
+      return (doneInCall)=>{
+        doneCount += (doneInCall - prevInCall);
+        prevInCall = doneInCall;
+        if(!silent) els("progressBar").style.width = Math.round((doneCount/total)*100)+"%";
+        els("status").textContent = `Fetched ${doneCount}/${total} symbols…`;
+      };
+    }
+
+    // Symbols we've never cached (or the cache came up empty for) need the
+    // full lookback window. Symbols we already have bars for only need
+    // whatever came after the newest cached bar - this is what turns a
+    // "Refresh" into a small delta fetch instead of re-downloading months of
+    // history every time.
+    const fullSymbols = [];
+    const incGroups = {}; // incremental start ISO -> [symbols]
+    for(const sym of symbols){
+      const cached = barCache.bars[sym];
+      if(cached && cached.length){
+        const lastMs = new Date(cached[cached.length-1].t).getTime();
+        const fromIso = new Date(lastMs + 1000).toISOString();
+        (incGroups[fromIso] = incGroups[fromIso] || []).push(sym);
+      } else {
+        fullSymbols.push(sym);
+      }
+    }
+
+    const barsMap = {};
+    if(fullSymbols.length){
+      Object.assign(barsMap, await fetchMultiBars(fullSymbols, start, end, timeframe, makeProgressHandler()));
+    }
+    for(const fromIso of Object.keys(incGroups)){
+      const groupSymbols = incGroups[fromIso];
+      Object.assign(barsMap, await fetchMultiBars(groupSymbols, fromIso, end, timeframe, makeProgressHandler()));
+    }
+
     results = {};
     for(const sym of symbols){
-      let raw = barsMap[sym] || [];
+      const cachedBars = barCache.bars[sym] || [];
+      const freshBars = barsMap[sym] || [];
+      let merged = fullSymbols.includes(sym) ? freshBars : mergeBars(cachedBars, freshBars);
+      merged = trimBarsToRange(merged, start);
+      barCache.bars[sym] = merged;
+
+      let raw = merged;
       if(timeframe !== "1Day") raw = raw.filter(b => isRegularSessionBar(b.t));
       if(raw.length < 60) { results[sym] = { ind:null, flags:null }; continue; }
       const ind = computeIndicators(raw, cfg.params);
       results[sym] = { ind, flags: screenerFlags(ind) };
     }
+
+    // Drop cached symbols that fell off the watchlist so the cache doesn't
+    // grow forever as the watchlist changes.
+    Object.keys(barCache.bars).forEach(sym => { if(!symbols.includes(sym)) delete barCache.bars[sym]; });
+    saveBarCache(barCache);
+
+    checkForNewHits();
     renderTable();
     if(selectedSymbol && results[selectedSymbol] && results[selectedSymbol].ind){
       drawChart(selectedSymbol);
@@ -636,12 +811,14 @@ async function runScan(){
     console.error(err);
     els("status").textContent = "Error: " + err.message;
   }finally{
-    els("scanBtn").disabled = false;
-    setTimeout(()=>{ els("progressWrap").classList.remove("on"); els("progressBar").style.width="0%"; }, 600);
+    if(!silent){
+      els("scanBtn").disabled = false;
+      setTimeout(()=>{ els("progressWrap").classList.remove("on"); els("progressBar").style.width="0%"; }, 600);
+    }
   }
 }
-els("scanBtn").onclick = runScan;
-els("refreshBtn").onclick = runScan;
+els("scanBtn").onclick = ()=> runScan();
+els("refreshBtn").onclick = ()=> runScan();
 
 // Chart Setup
 let chart=null, candleSeries=null, mtSegmentSeries=[];
@@ -822,7 +999,11 @@ function resizeOverlay(){
 
 // Drawing Tools
 let activeTool = null;
-let userDrawings = [];
+let drawingsBySymbol = {};
+function currentDrawings(){
+  if(!selectedSymbol) return [];
+  return drawingsBySymbol[selectedSymbol] || (drawingsBySymbol[selectedSymbol] = []);
+}
 let currentDraft = null;
 
 function setTool(toolName){
@@ -839,7 +1020,7 @@ function setTool(toolName){
 els("toolLine").onclick = ()=> setTool("line");
 els("toolHLine").onclick = ()=> setTool("hline");
 els("toolFree").onclick = ()=> setTool("free");
-els("clearDrawings").onclick = ()=>{ userDrawings = []; renderOverlay(); };
+els("clearDrawings").onclick = ()=>{ if(selectedSymbol) drawingsBySymbol[selectedSymbol] = []; renderOverlay(); };
 
 function initDrawingEvents(){
   const cv = els("overlay");
@@ -891,7 +1072,7 @@ function initDrawingEvents(){
       if(e && e.pointerId!==undefined && cv.hasPointerCapture && cv.hasPointerCapture(e.pointerId)){
         cv.releasePointerCapture(e.pointerId);
       }
-      userDrawings.push(currentDraft);
+      currentDrawings().push(currentDraft);
       currentDraft = null;
       isDown = false;
       renderOverlay();
@@ -955,7 +1136,7 @@ function renderOverlay(){
     overlayCtx.restore();
   }
 
-  const allDrawings = currentDraft ? [...userDrawings, currentDraft] : userDrawings;
+  const allDrawings = currentDraft ? [...currentDrawings(), currentDraft] : currentDrawings();
   overlayCtx.lineWidth = 2;
   overlayCtx.lineJoin = "round";
   overlayCtx.lineCap = "round";
@@ -1050,6 +1231,99 @@ els("closeChart").onclick = ()=>{
   els("chartPanel").classList.remove("open");
   els("chartPlaceholder").style.display = "block";
 };
+
+// Auto-refresh: silently re-scans on an interval so the table/chart stay
+// current without needing a manual click. Uses the incremental-fetch path
+// in runScan, so a 1-5 minute interval costs a small delta fetch, not a
+// full re-download.
+let autoRefreshTimer = null;
+function applyAutoRefresh(){
+  if(autoRefreshTimer){ clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  if(cfg.autoRefresh){
+    const ms = Math.max(1, cfg.autoRefreshMinutes || 5) * 60000;
+    autoRefreshTimer = setInterval(()=> runScan({ silent: true }), ms);
+  }
+}
+els("autoRefresh").checked = cfg.autoRefresh;
+els("autoRefreshInterval").value = String(cfg.autoRefreshMinutes || 5);
+els("notifyOnHits").checked = cfg.notifyOnHits;
+els("autoRefresh").onchange = ()=>{
+  cfg.autoRefresh = els("autoRefresh").checked;
+  saveCfg(cfg);
+  applyAutoRefresh();
+};
+els("autoRefreshInterval").onchange = ()=>{
+  cfg.autoRefreshMinutes = parseInt(els("autoRefreshInterval").value, 10);
+  saveCfg(cfg);
+  applyAutoRefresh();
+};
+els("notifyOnHits").onchange = ()=>{
+  cfg.notifyOnHits = els("notifyOnHits").checked;
+  saveCfg(cfg);
+  if(cfg.notifyOnHits && "Notification" in window && Notification.permission === "default"){
+    Notification.requestPermission();
+  }
+};
+
+// Fires a browser notification for symbols that newly became a MATCH since
+// the last completed scan (cache-hydrated results count as the baseline, so
+// this only ever reports genuinely new signals, never a flood of everything
+// that was already matching).
+let lastMatchedSet = new Set();
+let hasCompletedAnyScan = false;
+function currentMatchedSymbols(){
+  const set = new Set();
+  for(const sym of Object.keys(results)){
+    const r = results[sym];
+    if(r && r.flags && matchFromFlags(r.flags)) set.add(sym);
+  }
+  return set;
+}
+function checkForNewHits(){
+  const nowMatched = currentMatchedSymbols();
+  if(cfg.notifyOnHits && hasCompletedAnyScan && "Notification" in window && Notification.permission === "granted"){
+    const newly = [...nowMatched].filter(s => !lastMatchedSet.has(s));
+    if(newly.length){
+      const title = newly.length === 1 ? `${newly[0]} is a new match` : `${newly.length} new matches`;
+      const body = newly.slice(0, 6).join(", ") + (newly.length > 6 ? "…" : "");
+      try{ new Notification(title, { body, icon: "icon-192.png" }); }catch(e){}
+    }
+  }
+  lastMatchedSet = nowMatched;
+  hasCompletedAnyScan = true;
+}
+
+// Instant reopen: repaint from whatever's in the bar cache before any
+// network request completes, then a silent background scan brings it
+// current. Cache-derived matches become the notification baseline so the
+// very next refresh doesn't announce symbols that were already matching.
+function hydrateFromCache(){
+  if(!cfg.apiKey || !cfg.apiSecret) return;
+  const symbols = parseWatchlist();
+  if(!symbols.length) return;
+  let any = false;
+  results = {};
+  for(const sym of symbols){
+    const cached = barCache.bars[sym];
+    if(!cached || !cached.length){ results[sym] = { ind:null, flags:null }; continue; }
+    let raw = cached;
+    if(cfg.timeframe !== "1Day") raw = raw.filter(b => isRegularSessionBar(b.t));
+    if(raw.length < 60){ results[sym] = { ind:null, flags:null }; continue; }
+    results[sym] = { ind: computeIndicators(raw, cfg.params), flags: null };
+    results[sym].flags = screenerFlags(results[sym].ind);
+    any = true;
+  }
+  if(any){
+    renderTable();
+    lastMatchedSet = currentMatchedSymbols();
+    hasCompletedAnyScan = true;
+    els("status").textContent = "Showing cached results — refreshing…";
+  }
+}
+
+hydrateFromCache();
+applyAutoRefresh();
+if(cfg.apiKey && cfg.apiSecret) setTimeout(()=> runScan({ silent: true }), 400);
 
 if("serviceWorker" in navigator){
   window.addEventListener("load", ()=>{
