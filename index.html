@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Ripster Cloud Screener</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a0e14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RipsterCloud">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png" type="image/png">
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#11161f; --panel2:#161d29; --border:#232c3a;
+    --text:#e6edf3; --dim:#7d8899; --cyan:#33e0ff; --green:#20d67b;
+    --red:#FC0400; --amber:#ffb020; --accent:#4d7fff;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+  header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:20;}
+  header h1{font-size:16px;margin:0;letter-spacing:.3px;}
+  header h1 span{color:var(--cyan);}
+  .icon-btn{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:14px;}
+  .icon-btn:hover{border-color:var(--accent);}
+  .icon-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  main{padding:12px;max-width:1600px;margin:0 auto;}
+  .layout{display:flex;gap:14px;align-items:flex-start;}
+  .sidebar{flex:0 0 320px;max-width:320px;max-height:calc(100vh - 200px);overflow:auto;border-radius:10px;}
+  .chart-col{flex:1;min-width:0;}
+  .chart-placeholder{background:var(--panel);border:1px dashed var(--border);border-radius:10px;padding:60px 20px;text-align:center;color:var(--dim);font-size:14px;}
+  @media (max-width:900px){
+    .layout{flex-direction:column;}
+    .sidebar{flex:0 0 auto;max-width:none;width:100%;max-height:280px;}
+  }
+  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
+  .toolbar button{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer;font-size:13px;}
+  .toolbar button.secondary{background:var(--panel2);border:1px solid var(--border);color:var(--text);}
+  .toolbar button:disabled{opacity:.5;cursor:not-allowed;}
+  .toolbar label{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--dim);}
+  .toolbar select{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;}
+  #status{font-size:12px;color:var(--dim);margin-left:auto;}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;font-size:13px;}
+  thead th{text-align:left;padding:10px 8px;background:var(--panel2);color:var(--dim);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap;}
+  tbody td{padding:9px 8px;border-bottom:1px solid var(--border);white-space:nowrap;}
+  tbody tr{cursor:pointer;}
+  tbody tr:hover{background:#151c28;}
+  tbody tr.selected{background:#132033;}
+  .sym{font-weight:700;}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;}
+  .dot.g{background:var(--green);}
+  .dot.r{background:var(--red);}
+  .dot.n{background:#3a4454;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;}
+  .pill.g{background:rgba(32,214,123,.15);color:var(--green);}
+  .pill.r{background:rgba(252,4,0,.12);color:var(--red);}
+  .pill.match{background:rgba(51,224,255,.15);color:var(--cyan);border:1px solid rgba(51,224,255,.4);}
+  #chartPanel{margin-top:0;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;display:none;}
+  #chartPanel.open{display:block;}
+  .sidebar thead th{position:sticky;top:0;z-index:2;}
+  #chartHeader{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:8px;}
+  #chartHeader .sym{font-size:18px;}
+  #chartHeader .price{font-size:15px;color:var(--dim);}
+  .chart-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+  .chart-controls select{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;}
+  .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--dim);margin-left:auto;}
+  .legend span{display:flex;align-items:center;gap:5px;}
+  .legend i{width:10px;height:6px;display:inline-block;border-radius:2px;}
+  #chartWrap{position:relative;width:100%;height:480px;}
+  #chart{position:absolute;inset:0;}
+  #overlay{position:absolute;inset:0;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;pointer-events:none;}
+  #overlay.tool-active{cursor:crosshair;pointer-events:auto;}
+  .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;align-items:center;justify-content:center;padding:16px;}
+  .modal-bg.open{display:flex;}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow:auto;}
+  .modal h2{margin-top:0;font-size:15px;}
+  .modal label{display:block;font-size:12px;color:var(--dim);margin:12px 0 5px;}
+  .modal input,.modal select,.modal textarea{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:9px 10px;font-size:13px;font-family:inherit;}
+  .modal textarea{min-height:90px;resize:vertical;}
+  .modal .row{display:flex;gap:8px;margin-top:18px;}
+  .modal .row button{flex:1;padding:10px;border-radius:8px;border:none;cursor:pointer;font-weight:600;}
+  .modal .checkrow{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);margin:6px 0;}
+  .modal .row3{display:flex;gap:8px;flex-wrap:wrap;}
+  .modal .row3>div{flex:1;min-width:90px;}
+  .modal .row3 label{margin:0 0 4px;}
+  .modal .save{background:var(--accent);color:#fff;}
+  .modal .cancel{background:var(--panel2);color:var(--text);border:1px solid var(--border) !important;}
+  .empty{padding:40px;text-align:center;color:var(--dim);}
+  #progressWrap{display:none;height:4px;background:var(--panel2);border-radius:2px;overflow:hidden;margin-bottom:10px;}
+  #progressWrap.on{display:block;}
+  #progressBar{height:100%;background:var(--cyan);width:0%;transition:width .2s;}
+  @media (max-width:640px){
+    thead th:nth-child(2),tbody td:nth-child(2){display:none;}
+    #chartWrap{height:340px;}
+    .icon-btn{padding:10px 12px;font-size:15px;}
+    .chart-controls{width:100%;}
+    .chart-controls label{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:5px;}
+    .legend{width:100%;order:5;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Ripster <span>Cloud</span> Screener</h1>
+  <button class="icon-btn" id="settingsBtn">⚙ Settings</button>
+</header>
+
+<main>
+  <div class="toolbar">
+    <button id="scanBtn">Run Scan</button>
+    <button class="secondary" id="refreshBtn">Refresh</button>
+    <button class="secondary" id="conditionsBtn">⚙ Conditions</button>
+    <label>Timeframe
+      <select id="tf">
+        <option value="4Hour" selected>4H</option>
+        <option value="1Day">1D</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="hitsOnly"> Hits only</label>
+    <span id="status">Not connected</span>
+  </div>
+  <div id="progressWrap"><div id="progressBar"></div></div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Price</th>
+            <th>EMA5&gt;13</th>
+            <th>EMA13&gt;34</th>
+            <th>Bullish</th>
+            <th>MagicTrend</th>
+            <th>Signal</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="7" class="empty">Set your Alpaca keys in Settings, then Run Scan.</td></tr>
+        </tbody>
+      </table>
+    </aside>
+
+    <section class="chart-col">
+      <div id="chartPlaceholder" class="chart-placeholder">Select a symbol from the list to view its chart</div>
+      <div id="chartPanel">
+        <div id="chartHeader">
+          <span class="sym" id="chartSym">—</span>
+          <span class="price" id="chartPrice"></span>
+
+          <div class="chart-controls">
+            <label><input type="checkbox" id="showMagicTrend" checked> Show MagicTrend</label>
+            <button class="icon-btn" id="toolLine" title="Draw Trendline">📏 Line</button>
+            <button class="icon-btn" id="toolHLine" title="Draw Horizontal Level">➖ H-Level</button>
+            <button class="icon-btn" id="toolFree" title="Freehand Pen">✏ Pen</button>
+            <button class="icon-btn" id="clearDrawings" title="Clear Canvas Drawings">🗑 Clear</button>
+            <button class="icon-btn" id="exportBtn" style="color:var(--cyan);font-weight:600;">📷 Export Chart</button>
+          </div>
+
+          <div class="legend">
+            <span><i style="background:rgba(32,214,123,0.5)"></i>Ripster 5-13</span>
+            <span><i style="background:rgba(51,224,255,0.4)"></i>Ripster 34-50</span>
+            <span><i style="background:#20d67b"></i>MagicTrend Up</span>
+            <span><i style="background:#FC0400"></i>MagicTrend Down</span>
+          </div>
+          <button class="icon-btn" id="closeChart">✕</button>
+        </div>
+        <div id="chartWrap">
+          <div id="chart"></div>
+          <canvas id="overlay"></canvas>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="modal-bg" id="settingsModal">
+  <div class="modal">
+    <h2>Alpaca Settings</h2>
+    <label>API Key ID</label>
+    <input id="apiKey" type="text" autocomplete="off">
+    <label>API Secret Key</label>
+    <input id="apiSecret" type="password" autocomplete="off">
+    <label>Data Feed</label>
+    <select id="feed">
+      <option value="iex">iex (free)</option>
+      <option value="sip">sip (paid/unlimited)</option>
+    </select>
+    <label>Watchlist (comma or newline separated)</label>
+    <textarea id="watchlist" spellcheck="false"></textarea>
+    <div class="row">
+      <button class="cancel" id="cancelSettings">Cancel</button>
+      <button class="save" id="saveSettings">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="conditionsModal">
+  <div class="modal">
+    <h2>Scan Conditions</h2>
+
+    <label>Match logic</label>
+    <select id="matchMode">
+      <option value="all">Require ALL selected conditions</option>
+      <option value="any">Require ANY selected condition</option>
+    </select>
+
+    <label>Conditions to include in a match</label>
+    <label class="checkrow"><input type="checkbox" id="condEma5gt13"> EMA5 &gt; EMA13</label>
+    <label class="checkrow"><input type="checkbox" id="condEma13gt34"> EMA13 &gt; EMA34</label>
+    <label class="checkrow"><input type="checkbox" id="condBullish"> Bullish</label>
+    <label class="checkrow"><input type="checkbox" id="condMagicGreen"> MagicTrend Green</label>
+
+    <label>MagicTrend parameters</label>
+    <div class="row3">
+      <div><label>CCI Period</label><input type="number" id="pCciPeriod" min="2" step="1"></div>
+      <div><label>ATR Period</label><input type="number" id="pAtrPeriodMT" min="1" step="1"></div>
+      <div><label>ATR Multiplier</label><input type="number" id="pAtrMultMT" min="0" step="0.1"></div>
+    </div>
+
+    <label>Bullish parameters</label>
+    <div class="row3">
+      <div><label>Fast EMA</label><input type="number" id="pBullFastEma" min="1" step="1"></div>
+      <div><label>Slow EMA</label><input type="number" id="pBullSlowEma" min="1" step="1"></div>
+      <div><label>RSI Period</label><input type="number" id="pRsiPeriod" min="1" step="1"></div>
+      <div><label>RSI Threshold</label><input type="number" id="pRsiThreshold" min="0" max="100" step="1"></div>
+      <div><label>Cloud × ATR</label><input type="number" id="pCloudAtrFactor" min="0" step="0.05"></div>
+    </div>
+
+    <div class="row">
+      <button class="cancel" id="cancelConditions">Cancel</button>
+      <button class="save" id="applyConditions">Apply &amp; Scan</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+const LS_KEY = "ripster_screener_cfg_v1";
+function loadCfg(){
+  try{ return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }catch(e){ return {}; }
+}
+function saveCfg(cfg){ localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }
+
+const DEFAULT_PARAMS = {
+  cciPeriod: 20, atrPeriodMT: 5, atrMultMT: 1,
+  bullFastEma: 10, bullSlowEma: 21, rsiPeriod: 14, rsiThreshold: 50, cloudAtrFactor: 0.3
+};
+const DEFAULT_CONDITIONS = { ema5gt13: true, ema13gt34: true, bullish: true, magicGreen: true };
+
+let cfg = Object.assign({
+  apiKey: "", apiSecret: "", feed: "iex", timeframe: "4Hour",
+  watchlist: "AAPL,MSFT,NVDA,AMD,TSLA,AMZN,GOOGL,META,AVGO,NFLX,CRM,ORCL,COST,PANW,SHOP,UBER,PLTR,SMCI,MU,QCOM",
+  matchMode: "all",
+  conditions: Object.assign({}, DEFAULT_CONDITIONS),
+  params: Object.assign({}, DEFAULT_PARAMS)
+}, loadCfg());
+
+const els = id => document.getElementById(id);
+const settingsModal = els("settingsModal");
+
+els("tf").value = cfg.timeframe;
+els("tf").onchange = ()=>{
+  cfg.timeframe = els("tf").value;
+  saveCfg(cfg);
+  updateStatus();
+};
+
+function openSettings(){
+  els("apiKey").value = cfg.apiKey;
+  els("apiSecret").value = cfg.apiSecret;
+  els("feed").value = cfg.feed;
+  els("watchlist").value = cfg.watchlist;
+  settingsModal.classList.add("open");
+}
+els("settingsBtn").onclick = openSettings;
+els("cancelSettings").onclick = ()=> settingsModal.classList.remove("open");
+els("saveSettings").onclick = ()=>{
+  cfg.apiKey = els("apiKey").value.trim();
+  cfg.apiSecret = els("apiSecret").value.trim();
+  cfg.feed = els("feed").value;
+  cfg.watchlist = els("watchlist").value.trim();
+  saveCfg(cfg);
+  settingsModal.classList.remove("open");
+  updateStatus();
+};
+function updateStatus(){
+  const tfLabel = cfg.timeframe === "1Day" ? "1D" : "4H";
+  els("status").textContent = cfg.apiKey && cfg.apiSecret
+    ? `Connected · feed=${cfg.feed} · tf=${tfLabel} · ${parseWatchlist().length} symbols`
+    : "Not connected — open Settings";
+}
+
+// Scan Conditions modal: lets the person change which flags count toward a
+// "match" (and how they combine), plus tune the underlying Bullish/MagicTrend
+// formula inputs, then immediately re-scan with the new rules.
+const conditionsModal = els("conditionsModal");
+function openConditions(){
+  els("matchMode").value = cfg.matchMode;
+  els("condEma5gt13").checked = cfg.conditions.ema5gt13;
+  els("condEma13gt34").checked = cfg.conditions.ema13gt34;
+  els("condBullish").checked = cfg.conditions.bullish;
+  els("condMagicGreen").checked = cfg.conditions.magicGreen;
+  els("pCciPeriod").value = cfg.params.cciPeriod;
+  els("pAtrPeriodMT").value = cfg.params.atrPeriodMT;
+  els("pAtrMultMT").value = cfg.params.atrMultMT;
+  els("pBullFastEma").value = cfg.params.bullFastEma;
+  els("pBullSlowEma").value = cfg.params.bullSlowEma;
+  els("pRsiPeriod").value = cfg.params.rsiPeriod;
+  els("pRsiThreshold").value = cfg.params.rsiThreshold;
+  els("pCloudAtrFactor").value = cfg.params.cloudAtrFactor;
+  conditionsModal.classList.add("open");
+}
+els("conditionsBtn").onclick = openConditions;
+els("cancelConditions").onclick = ()=> conditionsModal.classList.remove("open");
+els("applyConditions").onclick = ()=>{
+  cfg.matchMode = els("matchMode").value;
+  cfg.conditions = {
+    ema5gt13: els("condEma5gt13").checked,
+    ema13gt34: els("condEma13gt34").checked,
+    bullish: els("condBullish").checked,
+    magicGreen: els("condMagicGreen").checked
+  };
+  const num = (id, fallback) => {
+    const v = parseFloat(els(id).value);
+    return Number.isFinite(v) ? v : fallback;
+  };
+  cfg.params = {
+    cciPeriod: Math.max(2, Math.round(num("pCciPeriod", DEFAULT_PARAMS.cciPeriod))),
+    atrPeriodMT: Math.max(1, Math.round(num("pAtrPeriodMT", DEFAULT_PARAMS.atrPeriodMT))),
+    atrMultMT: Math.max(0, num("pAtrMultMT", DEFAULT_PARAMS.atrMultMT)),
+    bullFastEma: Math.max(1, Math.round(num("pBullFastEma", DEFAULT_PARAMS.bullFastEma))),
+    bullSlowEma: Math.max(1, Math.round(num("pBullSlowEma", DEFAULT_PARAMS.bullSlowEma))),
+    rsiPeriod: Math.max(1, Math.round(num("pRsiPeriod", DEFAULT_PARAMS.rsiPeriod))),
+    rsiThreshold: Math.min(100, Math.max(0, num("pRsiThreshold", DEFAULT_PARAMS.rsiThreshold))),
+    cloudAtrFactor: Math.max(0, num("pCloudAtrFactor", DEFAULT_PARAMS.cloudAtrFactor))
+  };
+  saveCfg(cfg);
+  conditionsModal.classList.remove("open");
+  runScan();
+};
+
+function parseWatchlist(){
+  return cfg.watchlist.split(/[\s,]+/).map(s=>s.trim().toUpperCase()).filter(Boolean);
+}
+if(!cfg.apiKey || !cfg.apiSecret) setTimeout(openSettings, 300);
+updateStatus();
+
+const DATA_BASE = "https://data.alpaca.markets/v2";
+
+function headers(){
+  return { "APCA-API-KEY-ID": cfg.apiKey, "APCA-API-SECRET-KEY": cfg.apiSecret };
+}
+
+async function fetchMultiBars(symbols, start, end, timeframe, onProgress){
+  const out = {};
+  symbols.forEach(s=> out[s] = []);
+  const CHUNK = 60;
+  for(let i=0;i<symbols.length;i+=CHUNK){
+    const chunk = symbols.slice(i, i+CHUNK);
+    let pageToken = null;
+    do{
+      const params = new URLSearchParams({
+        symbols: chunk.join(","),
+        timeframe: timeframe,
+        start, end,
+        limit: "10000",
+        feed: cfg.feed,
+        adjustment: "raw"
+      });
+      if(pageToken) params.set("page_token", pageToken);
+      const res = await fetch(`${DATA_BASE}/stocks/bars?${params.toString()}`, { headers: headers() });
+      if(!res.ok){
+        const txt = await res.text().catch(()=> "");
+        throw new Error(`Alpaca error ${res.status}: ${txt.slice(0,200)}`);
+      }
+      const json = await res.json();
+      const bars = json.bars || {};
+      for(const sym of chunk){
+        if(bars[sym]) out[sym] = out[sym].concat(bars[sym]);
+      }
+      pageToken = json.next_page_token || null;
+    } while(pageToken);
+    if(onProgress) onProgress(Math.min(i+CHUNK, symbols.length), symbols.length);
+  }
+  return out;
+}
+
+function dateRangeFor(timeframe){
+  const end = new Date();
+  const start = new Date();
+  if(timeframe === "1Day"){
+    start.setFullYear(start.getFullYear() - 2); // ~2 years of daily bars
+  } else {
+    start.setMonth(start.getMonth() - 6); // ~6 months of 4H bars
+  }
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+// Keeps only bars that START within the NYSE regular trading session
+// (9:30am-4:00pm America/New_York, Mon-Fri), so pre-market/after-hours
+// candles never enter the indicators or the chart. Only meaningful for
+// intraday timeframes - daily bars are left alone, since a "1Day" bar's
+// timestamp isn't a clock time you can filter this way.
+function isRegularSessionBar(iso){
+  const d = new Date(iso);
+  const parts = {};
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", hour12: false,
+    weekday: "short", hour: "2-digit", minute: "2-digit"
+  }).formatToParts(d).forEach(p => parts[p.type] = p.value);
+  if(parts.weekday === "Sat" || parts.weekday === "Sun") return false;
+  const mins = parseInt(parts.hour, 10) * 60 + parseInt(parts.minute, 10);
+  return mins >= (9*60+30) && mins < (16*60);
+}
+
+function EMA(vals, period){
+  const out = new Array(vals.length).fill(NaN);
+  if(!vals.length) return out;
+  const k = 2/(period+1);
+  out[0] = vals[0];
+  for(let i=1;i<vals.length;i++) out[i] = vals[i]*k + out[i-1]*(1-k);
+  return out;
+}
+function SMA(vals, period){
+  const out = new Array(vals.length).fill(NaN);
+  let sum = 0;
+  for(let i=0;i<vals.length;i++){
+    sum += vals[i];
+    if(i>=period) sum -= vals[i-period];
+    out[i] = i>=period-1 ? sum/period : sum/(i+1);
+  }
+  return out;
+}
+function trueRangeSeries(bars){
+  const out = new Array(bars.length).fill(0);
+  for(let i=0;i<bars.length;i++){
+    const h=bars[i].h, l=bars[i].l, pc = i>0?bars[i-1].c:bars[i].c;
+    out[i] = Math.max(h-l, Math.abs(h-pc), Math.abs(l-pc));
+  }
+  return out;
+}
+function CCI(bars, period){
+  const tp = bars.map(b => (b.h+b.l+b.c)/3);
+  const smaTp = SMA(tp, period);
+  const out = new Array(bars.length).fill(0);
+  for(let i=0;i<bars.length;i++){
+    const from = Math.max(0, i-period+1);
+    const win = tp.slice(from, i+1);
+    const mean = smaTp[i];
+    const meanDev = win.reduce((s,v)=> s+Math.abs(v-mean), 0) / win.length;
+    out[i] = meanDev === 0 ? 0 : (tp[i]-mean) / (0.015*meanDev);
+  }
+  return out;
+}
+function RSI(closes, period){
+  const out = new Array(closes.length).fill(50);
+  let avgGain=0, avgLoss=0;
+  for(let i=1;i<closes.length;i++){
+    const diff = closes[i]-closes[i-1];
+    const gain = Math.max(diff,0), loss = Math.max(-diff,0);
+    if(i<=period){
+      avgGain += gain/period; avgLoss += loss/period;
+      out[i] = 50;
+    } else {
+      avgGain = (avgGain*(period-1)+gain)/period;
+      avgLoss = (avgLoss*(period-1)+loss)/period;
+      const rs = avgLoss===0 ? 100 : avgGain/avgLoss;
+      out[i] = avgLoss===0 ? 100 : 100 - (100/(1+rs));
+    }
+  }
+  return out;
+}
+function PVT(closes, volumes){
+  const out = new Array(closes.length).fill(0);
+  for(let i=1;i<closes.length;i++){
+    const prevClose = closes[i-1] || closes[i];
+    const diff = closes[i]-prevClose;
+    out[i] = out[i-1] + (prevClose!==0 ? (diff/prevClose)*volumes[i] : 0);
+  }
+  return out;
+}
+
+function computeIndicators(rawBars, params){
+  params = Object.assign({}, DEFAULT_PARAMS, params || {});
+  const bars = rawBars.map(b => ({ t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
+  const n = bars.length;
+  const closes = bars.map(b=>b.c), highs = bars.map(b=>b.h), lows = bars.map(b=>b.l), vols = bars.map(b=>b.v);
+
+  const ema5  = EMA(closes, 5);
+  const ema13 = EMA(closes, 13);
+  const ema34 = EMA(closes, 34);
+  const ema50 = EMA(closes, 50);
+
+  const emaFast = EMA(closes, params.bullFastEma);
+  const emaSlow = EMA(closes, params.bullSlowEma);
+  const rsi = RSI(closes, params.rsiPeriod);
+  const pvt = PVT(closes, vols);
+  const signal = SMA(pvt, 21);
+  const atr14 = SMA(trueRangeSeries(bars), 14);
+
+  const bullish = new Array(n).fill(false);
+  for(let i=0;i<n;i++){
+    const cloudHeight = Math.abs(emaFast[i]-emaSlow[i]);
+    bullish[i] = pvt[i] > signal[i] && emaFast[i] > emaSlow[i] && rsi[i] > params.rsiThreshold && (cloudHeight > atr14[i]*params.cloudAtrFactor);
+  }
+
+  // MagicTrend calculation
+  const cci = CCI(bars, params.cciPeriod);
+  const atr5 = SMA(trueRangeSeries(bars), params.atrPeriodMT);
+  const magicTrend = new Array(n).fill(0);
+
+  for(let i=0;i<n;i++){
+    const upT = lows[i] - atr5[i]*params.atrMultMT;
+    const downT = highs[i] + atr5[i]*params.atrMultMT;
+    const prevMT = i>0 ? magicTrend[i-1] : upT;
+    const prevCCI = i>0 ? cci[i-1] : cci[i];
+
+    if(cci[i] >= 0){
+      magicTrend[i] = prevCCI < 0 ? upT : Math.max(upT, prevMT);
+    } else {
+      magicTrend[i] = prevCCI >= 0 ? downT : Math.min(downT, prevMT);
+    }
+  }
+
+  // Exact rule: magicColor = cci >= 0 and bullish and close > magicPlot ? color.green : #FC0400
+  const magicGreen = new Array(n).fill(false);
+  for(let i=0;i<n;i++){
+    magicGreen[i] = cci[i] >= 0 && bullish[i] && (closes[i] > magicTrend[i]);
+  }
+
+  return { bars, ema5, ema13, ema34, ema50, bullish, magicTrend, magicGreen, cci };
+}
+
+// Which boolean flags currently count toward a "match", and how they combine.
+// Driven entirely by cfg.conditions / cfg.matchMode so the Scan Conditions
+// modal can change this without touching indicator math.
+function matchFromFlags(flags){
+  const active = Object.keys(cfg.conditions).filter(k => cfg.conditions[k]);
+  if(!active.length) return false;
+  return cfg.matchMode === "any" ? active.some(k => flags[k]) : active.every(k => flags[k]);
+}
+function isMatchAtBar(ind, i){
+  return matchFromFlags({
+    ema5gt13: ind.ema5[i] > ind.ema13[i],
+    ema13gt34: ind.ema13[i] > ind.ema34[i],
+    bullish: ind.bullish[i],
+    magicGreen: ind.magicGreen[i]
+  });
+}
+
+function screenerFlags(ind){
+  const i = ind.bars.length - 1;
+  if(i < 0) return null;
+  return {
+    price: ind.bars[i].c,
+    ema5gt13: ind.ema5[i] > ind.ema13[i],
+    ema13gt34: ind.ema13[i] > ind.ema34[i],
+    bullish: ind.bullish[i],
+    magicGreen: ind.magicGreen[i]
+  };
+}
+
+let results = {};
+let selectedSymbol = null;
+
+function renderTable(){
+  const tbody = els("tbody");
+  const hitsOnly = els("hitsOnly").checked;
+  const symbols = Object.keys(results).sort();
+  if(!symbols.length){
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">No results yet. Click Run Scan.</td></tr>`;
+    return;
+  }
+  let rows = "";
+  for(const sym of symbols){
+    const r = results[sym];
+    if(!r || !r.flags) continue;
+    const f = r.flags;
+    const isFullMatch = matchFromFlags(f);
+    if(hitsOnly && !isFullMatch) continue;
+    rows += `<tr data-sym="${sym}" class="${sym===selectedSymbol?'selected':''}">
+      <td class="sym">${sym}</td>
+      <td>${f.price.toFixed(2)}</td>
+      <td><span class="dot ${f.ema5gt13?'g':'r'}"></span></td>
+      <td><span class="dot ${f.ema13gt34?'g':'r'}"></span></td>
+      <td><span class="dot ${f.bullish?'g':'r'}"></span></td>
+      <td><span class="dot ${f.magicGreen?'g':'r'}"></span></td>
+      <td>${isFullMatch ? '<span class="pill match">MATCH</span>' : '<span class="pill r">no</span>'}</td>
+    </tr>`;
+  }
+  tbody.innerHTML = rows || `<tr><td colspan="7" class="empty">No hits.</td></tr>`;
+  tbody.querySelectorAll("tr[data-sym]").forEach(tr=>{
+    tr.onclick = ()=> selectSymbol(tr.getAttribute("data-sym"));
+  });
+}
+els("hitsOnly").onchange = renderTable;
+
+async function runScan(){
+  if(!cfg.apiKey || !cfg.apiSecret){ openSettings(); return; }
+  const symbols = parseWatchlist();
+  if(!symbols.length) return;
+  const timeframe = cfg.timeframe;
+  els("scanBtn").disabled = true;
+  els("progressWrap").classList.add("on");
+  els("progressBar").style.width = "2%";
+  els("status").textContent = "Fetching bars…";
+  try{
+    const { start, end } = dateRangeFor(timeframe);
+    const barsMap = await fetchMultiBars(symbols, start, end, timeframe, (done,total)=>{
+      const pct = Math.round((done/total)*100);
+      els("progressBar").style.width = pct+"%";
+      els("status").textContent = `Fetched ${done}/${total} symbols…`;
+    });
+    results = {};
+    for(const sym of symbols){
+      let raw = barsMap[sym] || [];
+      if(timeframe !== "1Day") raw = raw.filter(b => isRegularSessionBar(b.t));
+      if(raw.length < 60) { results[sym] = { ind:null, flags:null }; continue; }
+      const ind = computeIndicators(raw, cfg.params);
+      results[sym] = { ind, flags: screenerFlags(ind) };
+    }
+    renderTable();
+    if(selectedSymbol && results[selectedSymbol] && results[selectedSymbol].ind){
+      drawChart(selectedSymbol);
+    }
+    els("status").textContent = `Scan complete · ${symbols.length} symbols · ${new Date().toLocaleTimeString()}`;
+  }catch(err){
+    console.error(err);
+    els("status").textContent = "Error: " + err.message;
+  }finally{
+    els("scanBtn").disabled = false;
+    setTimeout(()=>{ els("progressWrap").classList.remove("on"); els("progressBar").style.width="0%"; }, 600);
+  }
+}
+els("scanBtn").onclick = runScan;
+els("refreshBtn").onclick = runScan;
+
+// Chart Setup
+let chart=null, candleSeries=null, mtSegmentSeries=[];
+let overlayCtx=null, currentInd=null;
+
+function ensureChart(){
+  if(chart) return;
+  const container = els("chart");
+  chart = LightweightCharts.createChart(container, {
+    layout: { background:{color:"transparent"}, textColor:"#8b96a5" },
+    grid: { vertLines:{color:"#182130"}, horzLines:{color:"#182130"} },
+    rightPriceScale: { borderColor:"#232c3a" },
+    timeScale: { borderColor:"#232c3a", timeVisible:true, secondsVisible:false },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    autoSize: true
+  });
+  
+  candleSeries = chart.addCandlestickSeries({
+    upColor:"#20d67b", downColor:"#FC0400", borderVisible:false,
+    wickUpColor:"#20d67b", wickDownColor:"#FC0400"
+  });
+
+  overlayCtx = els("overlay").getContext("2d");
+  chart.timeScale().subscribeVisibleLogicalRangeChange(renderOverlay);
+  window.addEventListener("resize", ()=> setTimeout(renderOverlay, 50));
+  initDrawingEvents();
+}
+
+function toChartTime(iso){ return Math.floor(new Date(iso).getTime()/1000); }
+
+// magicPlot = iff(showMagicTrend, MagicTrend, none)
+// magicColor = cci>=0 and bullish and close>magicPlot ? color.green : #FC0400
+// plt(magicPlot, color=magicColor, line_width=1)
+//
+// A shared line series with "whitespace" gaps does NOT actually stop
+// Lightweight Charts from drawing a straight connector between whichever two
+// real points happen to exist, however far apart in time - with a trend that
+// flips often, that produced long stray diagonals cutting across the whole
+// chart. The reliable fix is to give each contiguous same-color run its own
+// dedicated line series, so there is no shared series left for a bogus
+// connecting line to be drawn on. Each run also starts one bar early (the
+// last bar of the previous run) purely so the runs visually touch end-to-end
+// with no gap between colors, matching how Pine Script colors a single plot
+// per-bar.
+function clearMagicTrendSeries(){
+  mtSegmentSeries.forEach(s => { try{ chart.removeSeries(s); }catch(e){} });
+  mtSegmentSeries = [];
+}
+
+function updateMagicTrendSeries(){
+  if(!currentInd || !chart) return;
+  clearMagicTrendSeries();
+  if(!els("showMagicTrend").checked) return;
+
+  const ind = currentInd;
+  const n = ind.bars.length;
+  let i = 0;
+  while(i < n){
+    const isGreen = ind.magicGreen[i];
+    let j = i;
+    while(j+1 < n && ind.magicGreen[j+1] === isGreen) j++;
+
+    const from = Math.max(i-1, 0); // include prior bar's point so runs connect with no gap
+    const segData = [];
+    for(let k=from; k<=j; k++){
+      segData.push({ time: toChartTime(ind.bars[k].t), value: ind.magicTrend[k] });
+    }
+
+    const isLastRun = (j === n-1);
+    const series = chart.addLineSeries({
+      color: isGreen ? "#20d67b" : "#FC0400",
+      lineWidth: 2,
+      lineStyle: LightweightCharts.LineStyle.Solid,
+      priceLineVisible: isLastRun,
+      priceLineStyle: LightweightCharts.LineStyle.Dotted,
+      lastValueVisible: isLastRun,
+      crosshairMarkerVisible: false
+    });
+    series.setData(segData);
+    mtSegmentSeries.push(series);
+
+    i = j + 1;
+  }
+}
+els("showMagicTrend").onchange = updateMagicTrendSeries;
+
+// Restricts the chart's initial visible window to roughly the last calendar
+// month of data (falling back to the full range if there's less than a
+// month available), so candles start out wide/zoomed instead of compressed
+// across the whole loaded history.
+function setInitialVisibleRange(ind){
+  const n = ind.bars.length;
+  if(n === 0 || !chart) return;
+  const lastTime = toChartTime(ind.bars[n-1].t);
+  const firstTime = toChartTime(ind.bars[0].t);
+  const cutoff = new Date(ind.bars[n-1].t);
+  cutoff.setMonth(cutoff.getMonth() - 1);
+  let fromTime = toChartTime(cutoff.toISOString());
+  if(fromTime < firstTime) fromTime = firstTime;
+  try{
+    chart.timeScale().setVisibleRange({ from: fromTime, to: lastTime });
+  }catch(e){
+    chart.timeScale().fitContent();
+  }
+}
+
+function drawChart(symbol){
+  const entry = results[symbol];
+  if(!entry || !entry.ind) return;
+  ensureChart();
+  currentInd = entry.ind;
+  const ind = entry.ind;
+  const n = ind.bars.length;
+
+  // Color each candle by the MagicTrend rule (green when magicGreen[i] is
+  // true, red otherwise) instead of the usual close-vs-open coloring, so the
+  // candles visually confirm the same trend the MagicTrend line is showing.
+  const candleData = ind.bars.map((b,i)=>{
+    const up = ind.magicGreen[i];
+    const color = up ? "#20d67b" : "#FC0400";
+    return {
+      time: toChartTime(b.t), open:b.o, high:b.h, low:b.l, close:b.c,
+      color, borderColor: color, wickColor: color
+    };
+  });
+  candleSeries.setData(candleData);
+  updateMagicTrendSeries();
+
+  // Show the symbol's name only where a NEW hit begins (rising edge of all 4
+  // conditions), not on every bar of an ongoing streak - a trend can stay
+  // "hit" for dozens of bars in a row, and marking each one turns into an
+  // unreadable wall of overlapping labels. Also enforce a minimum bar gap so
+  // two separate signals close together don't collide either.
+  const MIN_MARKER_GAP = 4; // bars
+  const markers = [];
+  let lastMarkerIdx = -Infinity;
+  for(let i=0;i<n;i++){
+    const isHit = isMatchAtBar(ind, i);
+    const prevHit = i>0 && isMatchAtBar(ind, i-1);
+    const isNewHit = isHit && !prevHit;
+    if(isNewHit && (i - lastMarkerIdx) >= MIN_MARKER_GAP){
+      markers.push({
+        time: toChartTime(ind.bars[i].t),
+        position: "belowBar",
+        color: "#33e0ff",
+        shape: "arrowUp",
+        text: symbol
+      });
+      lastMarkerIdx = i;
+    }
+  }
+  candleSeries.setMarkers(markers);
+
+  // Start zoomed in on the last month of bars rather than fitting the whole
+  // history - fitContent() squeezes months of candles into the width of the
+  // chart, making them nearly invisible. The full history is still loaded
+  // and the person can scroll/zoom out freely; this only sets where the view
+  // starts.
+  setInitialVisibleRange(ind);
+  els("chartSym").textContent = symbol;
+  const last = ind.bars[n-1];
+  els("chartPrice").textContent = `$${last.c.toFixed(2)}`;
+  els("chartPanel").classList.add("open");
+  els("chartPlaceholder").style.display = "none";
+  setTimeout(renderOverlay, 60);
+}
+
+function resizeOverlay(){
+  const wrap = els("chartWrap");
+  const cv = els("overlay");
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = wrap.clientWidth*dpr;
+  cv.height = wrap.clientHeight*dpr;
+  cv.style.width = wrap.clientWidth+"px";
+  cv.style.height = wrap.clientHeight+"px";
+  overlayCtx.setTransform(dpr,0,0,dpr,0,0);
+}
+
+// Drawing Tools
+let activeTool = null;
+let userDrawings = [];
+let currentDraft = null;
+
+function setTool(toolName){
+  activeTool = activeTool === toolName ? null : toolName;
+  ['toolLine', 'toolHLine', 'toolFree'].forEach(id => els(id).classList.remove('active'));
+  if(activeTool === 'line') els('toolLine').classList.add('active');
+  if(activeTool === 'hline') els('toolHLine').classList.add('active');
+  if(activeTool === 'free') els('toolFree').classList.add('active');
+  // Only capture touch/mouse input on the overlay while a tool is active,
+  // otherwise let it pass through so the chart underneath can pan/zoom
+  // (crucial on mobile, where a full-bleed canvas would otherwise block it).
+  els('overlay').classList.toggle('tool-active', !!activeTool);
+}
+els("toolLine").onclick = ()=> setTool("line");
+els("toolHLine").onclick = ()=> setTool("hline");
+els("toolFree").onclick = ()=> setTool("free");
+els("clearDrawings").onclick = ()=>{ userDrawings = []; renderOverlay(); };
+
+function initDrawingEvents(){
+  const cv = els("overlay");
+  let isDown = false;
+  let smoothX = 0, smoothY = 0;
+  const MIN_DIST = 2;       // px - skip points closer than this (reduces jitter/array bloat)
+  const SMOOTH_ALPHA = 0.35; // exponential smoothing factor for freehand input
+
+  function pointFromEvent(e){
+    const rect = cv.getBoundingClientRect();
+    return [e.clientX - rect.left, e.clientY - rect.top];
+  }
+
+  cv.addEventListener("pointerdown", (e)=>{
+    if(!activeTool) return;
+    isDown = true;
+    cv.setPointerCapture(e.pointerId);
+    const [x,y] = pointFromEvent(e);
+    smoothX = x; smoothY = y;
+
+    if(activeTool === "line") currentDraft = { type: "line", x1: x, y1: y, x2: x, y2: y };
+    else if(activeTool === "hline") currentDraft = { type: "hline", y: y };
+    else if(activeTool === "free") currentDraft = { type: "free", pts: [[x,y]] };
+    renderOverlay();
+  });
+
+  cv.addEventListener("pointermove", (e)=>{
+    if(!isDown || !currentDraft) return;
+    const [x,y] = pointFromEvent(e);
+
+    if(currentDraft.type === "line"){ currentDraft.x2 = x; currentDraft.y2 = y; }
+    else if(currentDraft.type === "hline"){ currentDraft.y = y; }
+    else if(currentDraft.type === "free"){
+      // Smooth the raw input first, then only record a new point once it has
+      // moved far enough - this is what keeps freehand strokes from looking
+      // jagged/noisy on trackpads and especially on touch screens.
+      smoothX += (x - smoothX) * SMOOTH_ALPHA;
+      smoothY += (y - smoothY) * SMOOTH_ALPHA;
+      const pts = currentDraft.pts;
+      const last = pts[pts.length-1];
+      const dist = Math.hypot(smoothX-last[0], smoothY-last[1]);
+      if(dist >= MIN_DIST) pts.push([smoothX, smoothY]);
+    }
+    renderOverlay();
+  });
+
+  const stopDrawing = (e)=>{
+    if(isDown && currentDraft){
+      if(e && e.pointerId!==undefined && cv.hasPointerCapture && cv.hasPointerCapture(e.pointerId)){
+        cv.releasePointerCapture(e.pointerId);
+      }
+      userDrawings.push(currentDraft);
+      currentDraft = null;
+      isDown = false;
+      renderOverlay();
+    }
+  };
+  cv.addEventListener("pointerup", stopDrawing);
+  cv.addEventListener("pointercancel", stopDrawing);
+}
+
+// Ripster Cloud Fill (Clouds Only - No EMA Lines)
+function renderOverlay(){
+  if(!chart || !currentInd || !overlayCtx) return;
+  resizeOverlay();
+  const wrap = els("chartWrap");
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  overlayCtx.clearRect(0,0,w,h);
+
+  const ind = currentInd;
+  const ts = chart.timeScale();
+
+  function buildPath(valsA, valsB){
+    const ptsTop=[], ptsBot=[];
+    for(let i=0;i<ind.bars.length;i++){
+      const t = toChartTime(ind.bars[i].t);
+      const x = ts.timeToCoordinate(t);
+      if(x===null) continue;
+      const ya = candleSeries.priceToCoordinate(valsA[i]);
+      const yb = candleSeries.priceToCoordinate(valsB[i]);
+      if(ya===null||yb===null) continue;
+      ptsTop.push([x,ya]); ptsBot.push([x,yb]);
+    }
+    return {ptsTop, ptsBot};
+  }
+
+  function fillCloud(valsA, valsB, colorFn){
+    const {ptsTop, ptsBot} = buildPath(valsA, valsB);
+    if(ptsTop.length < 2) return;
+    for(let i=0;i<ptsTop.length-1;i++){
+      const bull = valsA[i] >= valsB[i];
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(ptsTop[i][0], ptsTop[i][1]);
+      overlayCtx.lineTo(ptsTop[i+1][0], ptsTop[i+1][1]);
+      overlayCtx.lineTo(ptsBot[i+1][0], ptsBot[i+1][1]);
+      overlayCtx.lineTo(ptsBot[i][0], ptsBot[i][1]);
+      overlayCtx.closePath();
+      overlayCtx.fillStyle = bull ? colorFn.up : colorFn.down;
+      overlayCtx.fill();
+    }
+  }
+
+  fillCloud(ind.ema5, ind.ema13, { up:"rgba(32,214,123,0.25)", down:"rgba(252,4,0,0.22)" });
+  fillCloud(ind.ema34, ind.ema50, { up:"rgba(51,224,255,0.18)", down:"rgba(255,176,32,0.15)" });
+
+  // Live watermark: show the symbol's name on the chart itself (not just on export)
+  if(selectedSymbol){
+    overlayCtx.save();
+    overlayCtx.textAlign = "right";
+    overlayCtx.fillStyle = "rgba(255,255,255,0.06)";
+    overlayCtx.font = `bold ${Math.min(56, w*0.14)}px sans-serif`;
+    overlayCtx.fillText(selectedSymbol, w-16, h/2);
+    overlayCtx.restore();
+  }
+
+  const allDrawings = currentDraft ? [...userDrawings, currentDraft] : userDrawings;
+  overlayCtx.lineWidth = 2;
+  overlayCtx.lineJoin = "round";
+  overlayCtx.lineCap = "round";
+  allDrawings.forEach(d => {
+    overlayCtx.strokeStyle = "#33e0ff";
+    if(d.type === "line"){
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(d.x1, d.y1);
+      overlayCtx.lineTo(d.x2, d.y2);
+      overlayCtx.stroke();
+    } else if(d.type === "hline"){
+      overlayCtx.beginPath();
+      overlayCtx.setLineDash([4, 4]);
+      overlayCtx.moveTo(0, d.y);
+      overlayCtx.lineTo(w, d.y);
+      overlayCtx.stroke();
+      overlayCtx.setLineDash([]);
+    } else if(d.type === "free" && d.pts.length > 1){
+      overlayCtx.beginPath();
+      const pts = d.pts;
+      overlayCtx.moveTo(pts[0][0], pts[0][1]);
+      if(pts.length === 2){
+        overlayCtx.lineTo(pts[1][0], pts[1][1]);
+      } else {
+        // Smooth the stroke by curving through the midpoint of each pair of
+        // points, using the raw point as the curve's control point.
+        for(let i=1; i<pts.length-1; i++){
+          const midX = (pts[i][0]+pts[i+1][0])/2;
+          const midY = (pts[i][1]+pts[i+1][1])/2;
+          overlayCtx.quadraticCurveTo(pts[i][0], pts[i][1], midX, midY);
+        }
+        const last = pts[pts.length-1];
+        overlayCtx.lineTo(last[0], last[1]);
+      }
+      overlayCtx.stroke();
+    }
+  });
+}
+
+// Chart Export with Watermark
+els("exportBtn").onclick = ()=>{
+  if(!chart || !selectedSymbol) return;
+  const chartCanvas = els("chart").querySelector("canvas");
+  const overlayCanvas = els("overlay");
+  if(!chartCanvas) return;
+
+  const exportCanvas = document.createElement("canvas");
+  exportCanvas.width = chartCanvas.width;
+  exportCanvas.height = chartCanvas.height;
+  const ctx = exportCanvas.getContext("2d");
+
+  ctx.fillStyle = "#0a0e14";
+  ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+  ctx.drawImage(chartCanvas, 0, 0);
+  ctx.drawImage(overlayCanvas, 0, 0);
+
+  const dpr = window.devicePixelRatio || 1;
+  const textSym = selectedSymbol;
+  const textTf = (cfg.timeframe === "1Day" ? "1D" : "4H") + " · Ripster Cloud";
+  const dateStr = new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+  ctx.save();
+  ctx.textAlign = "right";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+  ctx.font = `bold ${56 * dpr}px sans-serif`;
+  ctx.fillText(textSym, exportCanvas.width - (30 * dpr), exportCanvas.height / 2);
+
+  ctx.textAlign = "left";
+  ctx.font = `bold ${15 * dpr}px sans-serif`;
+  ctx.fillStyle = "#33e0ff";
+  ctx.fillText(`${textSym} - ${textTf}`, 20 * dpr, 30 * dpr);
+
+  ctx.font = `${11 * dpr}px sans-serif`;
+  ctx.fillStyle = "#7d8899";
+  ctx.fillText(`Exported: ${dateStr}`, 20 * dpr, 48 * dpr);
+  ctx.restore();
+
+  const link = document.createElement("a");
+  link.download = `${selectedSymbol}_${cfg.timeframe === "1Day" ? "1D" : "4H"}_Ripster_Cloud.png`;
+  link.href = exportCanvas.toDataURL("image/png");
+  link.click();
+};
+
+function selectSymbol(sym){
+  selectedSymbol = sym;
+  renderTable();
+  drawChart(sym);
+}
+
+els("closeChart").onclick = ()=>{
+  els("chartPanel").classList.remove("open");
+  els("chartPlaceholder").style.display = "block";
+};
+
+if("serviceWorker" in navigator){
+  window.addEventListener("load", ()=>{
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+
+})();
+</script>
+</body>
+</html>
