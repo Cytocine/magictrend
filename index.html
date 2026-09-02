@@ -35,9 +35,11 @@
   .chart-placeholder{background:var(--panel);border:1px dashed var(--border);border-radius:10px;padding:60px 20px;text-align:center;color:var(--dim);font-size:14px;}
   @media (max-width:900px){
     .layout{flex-direction:column;}
-    .sidebar{flex:0 0 auto;max-width:none;width:100%;max-height:280px;}
+    .sidebar{flex:0 0 auto;max-width:none;width:100%;max-height:55vh;}
   }
   .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
+  .toolbar-more{display:contents;}
+  #toolbarMoreBtn{display:none;}
   .toolbar button{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer;font-size:13px;}
   .toolbar button.secondary{background:var(--panel2);border:1px solid var(--border);color:var(--text);}
   .toolbar button:disabled{opacity:.5;cursor:not-allowed;}
@@ -59,6 +61,10 @@
   .pill.g{background:rgba(32,214,123,.15);color:var(--green);}
   .pill.r{background:rgba(252,4,0,.12);color:var(--red);}
   .pill.match{background:rgba(51,224,255,.15);color:var(--cyan);border:1px solid rgba(51,224,255,.4);}
+  .trendval{font-weight:700;font-size:14px;}
+  .trendval.up{color:var(--green);}
+  .trendval.down{color:var(--red);}
+  .trendval.dim{color:var(--dim);font-weight:400;}
   #chartPanel{margin-top:0;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;display:none;}
   #chartPanel.open{display:block;}
   .sidebar thead th{position:sticky;top:0;z-index:2;}
@@ -96,12 +102,27 @@
   #progressWrap.on{display:block;}
   #progressBar{height:100%;background:var(--cyan);width:0%;transition:width .2s;}
   @media (max-width:640px){
-    thead th:nth-child(3),tbody td:nth-child(3){display:none;}
     #chartWrap{height:340px;}
     .icon-btn{padding:10px 12px;font-size:15px;}
     .chart-controls{width:100%;}
     .chart-controls label{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:5px;}
     .legend{width:100%;order:5;}
+
+    /* Collapsible "More" toolbar panel */
+    #toolbarMoreBtn{display:inline-flex;}
+    .toolbar-more{display:none;flex-direction:column;align-items:stretch;gap:12px;width:100%;order:10;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:2px;}
+    .toolbar-more.open{display:flex;}
+    .toolbar-more label{justify-content:space-between;}
+    .toolbar-more button{width:100%;}
+    #status{width:100%;margin-left:0;order:9;}
+
+    /* Bigger, touch-friendly watchlist */
+    table{font-size:15px;}
+    thead th{padding:12px 10px;font-size:12px;}
+    tbody td{padding:15px 10px;}
+    tbody tr{min-height:48px;}
+    .sym{font-size:15px;}
+    .trendval{font-size:17px;}
   }
 </style>
 </head>
@@ -116,25 +137,29 @@
   <div class="toolbar">
     <button id="scanBtn">Run Scan</button>
     <button class="secondary" id="refreshBtn">Refresh</button>
-    <button class="secondary" id="conditionsBtn">⚙ Conditions</button>
-    <label>Timeframe
-      <select id="tf">
-        <option value="4Hour" selected>4H</option>
-        <option value="1Day">1D</option>
-      </select>
-    </label>
-    <label><input type="checkbox" id="hitsOnly"> Hits only</label>
-    <label><input type="checkbox" id="autoRefresh"> Auto-refresh
-      <select id="autoRefreshInterval">
-        <option value="1">1m</option>
-        <option value="2">2m</option>
-        <option value="5" selected>5m</option>
-        <option value="15">15m</option>
-      </select>
-    </label>
-    <label><input type="checkbox" id="notifyOnHits"> Notify on hits</label>
-    <button class="secondary" id="exportCsvBtn">⬇ CSV</button>
+    <button class="secondary" id="toolbarMoreBtn" aria-expanded="false">⋯ More</button>
     <span id="status">Not connected</span>
+
+    <div class="toolbar-more" id="toolbarMore">
+      <button class="secondary" id="conditionsBtn">⚙ Conditions</button>
+      <label>Timeframe
+        <select id="tf">
+          <option value="4Hour" selected>4H</option>
+          <option value="1Day">1D</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="hitsOnly"> Hits only</label>
+      <label><input type="checkbox" id="autoRefresh"> Auto-refresh
+        <select id="autoRefreshInterval">
+          <option value="1">1m</option>
+          <option value="2">2m</option>
+          <option value="5" selected>5m</option>
+          <option value="15">15m</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="notifyOnHits"> Notify on hits</label>
+      <button class="secondary" id="exportCsvBtn">⬇ CSV</button>
+    </div>
   </div>
   <div id="progressWrap"><div id="progressBar"></div></div>
 
@@ -144,17 +169,12 @@
         <thead>
           <tr>
             <th data-sort="symbol">Symbol</th>
-            <th data-sort="price">Price</th>
-            <th data-sort="chg">Chg%</th>
-            <th>EMA5&gt;13</th>
-            <th>EMA13&gt;34</th>
-            <th>Bullish</th>
-            <th>MagicTrend</th>
-            <th data-sort="match">Signal</th>
+            <th data-sort="bars4h">4H</th>
+            <th data-sort="bars1d">1D</th>
           </tr>
         </thead>
         <tbody id="tbody">
-          <tr><td colspan="8" class="empty">Set your Alpaca keys in Settings, then Run Scan.</td></tr>
+          <tr><td colspan="3" class="empty">Set your Alpaca keys in Settings, then Run Scan.</td></tr>
         </tbody>
       </table>
     </aside>
@@ -262,21 +282,32 @@ function loadCfg(){
 }
 function saveCfg(cfg){ localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }
 
+// The watchlist table now tracks trend-change bar counts on BOTH the 4H and
+// 1D timeframes at once, so every scan fetches/caches both regardless of
+// which timeframe is selected in the "tf" dropdown (that dropdown still
+// controls the chart + match-condition timeframe).
+const TIMEFRAMES = ["4Hour", "1Day"];
+
 // Bar cache: lets a re-scan fetch only the bars newer than what we already
 // have (instead of re-downloading the whole lookback window every time), and
 // lets the app repaint instantly from last session's data before the network
-// even responds. Keyed off feed+timeframe since bar granularity/session
-// differs between them - switching either starts the cache fresh.
-const BAR_CACHE_KEY = "ripster_screener_barcache_v1";
-function loadBarCache(){
+// even responds. Keyed off feed, with one bucket per timeframe - switching
+// feed starts the cache fresh.
+const BAR_CACHE_KEY = "ripster_screener_barcache_v2";
+function loadBarCaches(){
   try{
     const raw = JSON.parse(localStorage.getItem(BAR_CACHE_KEY));
-    if(raw && raw.feed === cfg.feed && raw.timeframe === cfg.timeframe && raw.bars) return raw;
+    if(raw && raw.feed === cfg.feed && raw.tf){
+      TIMEFRAMES.forEach(tf => { if(!raw.tf[tf]) raw.tf[tf] = { bars:{} }; });
+      return raw.tf;
+    }
   }catch(e){}
-  return { feed: cfg.feed, timeframe: cfg.timeframe, bars: {} };
+  const fresh = {};
+  TIMEFRAMES.forEach(tf => fresh[tf] = { bars:{} });
+  return fresh;
 }
-function saveBarCache(cache){
-  try{ localStorage.setItem(BAR_CACHE_KEY, JSON.stringify(cache)); }
+function saveBarCaches(caches){
+  try{ localStorage.setItem(BAR_CACHE_KEY, JSON.stringify({ feed: cfg.feed, tf: caches })); }
   catch(e){ /* quota exceeded or storage disabled - caching is best-effort */ }
 }
 function mergeBars(oldBars, newBars){
@@ -305,7 +336,7 @@ let cfg = Object.assign({
   params: Object.assign({}, DEFAULT_PARAMS)
 }, loadCfg());
 
-let barCache = loadBarCache();
+let barCaches = loadBarCaches();
 
 const els = id => document.getElementById(id);
 const settingsModal = els("settingsModal");
@@ -325,6 +356,17 @@ function openSettings(){
   settingsModal.classList.add("open");
 }
 els("settingsBtn").onclick = openSettings;
+
+// Mobile-only collapsible panel for the secondary toolbar controls
+// (Conditions/Timeframe/Hits only/Auto-refresh/Notify/CSV). On wider
+// screens .toolbar-more is always visible (display:contents), so this
+// toggle only matters below the 640px breakpoint.
+els("toolbarMoreBtn").onclick = ()=>{
+  const panel = els("toolbarMore");
+  const open = panel.classList.toggle("open");
+  els("toolbarMoreBtn").setAttribute("aria-expanded", String(open));
+  els("toolbarMoreBtn").textContent = open ? "▲ Less" : "⋯ More";
+};
 els("cancelSettings").onclick = ()=> settingsModal.classList.remove("open");
 els("saveSettings").onclick = ()=>{
   cfg.apiKey = els("apiKey").value.trim();
@@ -583,6 +625,23 @@ function computeIndicators(rawBars, params){
   return { bars, ema5, ema13, ema34, ema50, bullish, magicTrend, magicGreen, cci };
 }
 
+// Trend direction = sign of CCI, the same signal that flips MagicTrend
+// between its up/down stop line. Counts bars back from the latest one until
+// that sign last changed, so the watchlist can show "how many bars old" the
+// current trend is on a given timeframe.
+function trendBarsSinceChange(ind){
+  const n = ind.cci.length;
+  if(n < 1) return null;
+  const dir = ind.cci[n-1] >= 0 ? "up" : "down";
+  let bars = 1;
+  for(let i = n-2; i >= 0; i--){
+    const d = ind.cci[i] >= 0 ? "up" : "down";
+    if(d !== dir) break;
+    bars++;
+  }
+  return { bars, dir };
+}
+
 // Which boolean flags currently count toward a "match", and how they combine.
 // Driven entirely by cfg.conditions / cfg.matchMode so the Scan Conditions
 // modal can change this without touching indicator math.
@@ -626,12 +685,10 @@ function matchScore(f){
 
 function sortSymbols(symbols){
   return symbols.slice().sort((a,b)=>{
-    const fa = results[a] && results[a].flags;
-    const fb = results[b] && results[b].flags;
+    const ra = results[a], rb = results[b];
     let va, vb;
-    if(sortKey === "price"){ va = fa ? fa.price : -Infinity; vb = fb ? fb.price : -Infinity; }
-    else if(sortKey === "chg"){ va = fa ? fa.chg : -Infinity; vb = fb ? fb.chg : -Infinity; }
-    else if(sortKey === "match"){ va = fa ? matchScore(fa) : -1; vb = fb ? matchScore(fb) : -1; }
+    if(sortKey === "bars4h"){ va = ra && ra.trend4h ? ra.trend4h.bars : -Infinity; vb = rb && rb.trend4h ? rb.trend4h.bars : -Infinity; }
+    else if(sortKey === "bars1d"){ va = ra && ra.trend1d ? ra.trend1d.bars : -Infinity; vb = rb && rb.trend1d ? rb.trend1d.bars : -Infinity; }
     else { va = a; vb = b; }
     if(va < vb) return -1 * sortDir;
     if(va > vb) return 1 * sortDir;
@@ -655,36 +712,35 @@ document.querySelectorAll("th[data-sort]").forEach(th=>{
   };
 });
 
+// Renders one "N bars" cell, colored/arrowed by trend direction.
+function trendCellHtml(t){
+  if(!t) return `<span class="trendval dim">—</span>`;
+  const cls = t.dir === "up" ? "up" : "down";
+  const arrow = t.dir === "up" ? "▲" : "▼";
+  return `<span class="trendval ${cls}">${arrow} ${t.bars}</span>`;
+}
+
 function renderTable(){
   const tbody = els("tbody");
   const hitsOnly = els("hitsOnly").checked;
   updateSortIndicators();
   const symbols = sortSymbols(Object.keys(results));
   if(!symbols.length){
-    tbody.innerHTML = `<tr><td colspan="8" class="empty">No results yet. Click Run Scan.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="3" class="empty">No results yet. Click Run Scan.</td></tr>`;
     return;
   }
   let rows = "";
   for(const sym of symbols){
     const r = results[sym];
-    if(!r || !r.flags) continue;
-    const f = r.flags;
-    const isFullMatch = matchFromFlags(f);
-    if(hitsOnly && !isFullMatch) continue;
-    const chgColor = f.chg > 0 ? "var(--green)" : (f.chg < 0 ? "var(--red)" : "var(--dim)");
-    const chgSign = f.chg > 0 ? "+" : "";
+    if(!r || (!r.trend4h && !r.trend1d)) continue;
+    if(hitsOnly && !(r.flags && matchFromFlags(r.flags))) continue;
     rows += `<tr data-sym="${sym}" class="${sym===selectedSymbol?'selected':''}">
       <td class="sym">${sym}</td>
-      <td>${f.price.toFixed(2)}</td>
-      <td style="color:${chgColor}">${chgSign}${f.chg.toFixed(2)}%</td>
-      <td><span class="dot ${f.ema5gt13?'g':'r'}"></span></td>
-      <td><span class="dot ${f.ema13gt34?'g':'r'}"></span></td>
-      <td><span class="dot ${f.bullish?'g':'r'}"></span></td>
-      <td><span class="dot ${f.magicGreen?'g':'r'}"></span></td>
-      <td>${isFullMatch ? '<span class="pill match">MATCH</span>' : '<span class="pill r">no</span>'}</td>
+      <td>${trendCellHtml(r.trend4h)}</td>
+      <td>${trendCellHtml(r.trend1d)}</td>
     </tr>`;
   }
-  tbody.innerHTML = rows || `<tr><td colspan="8" class="empty">No hits.</td></tr>`;
+  tbody.innerHTML = rows || `<tr><td colspan="3" class="empty">No hits.</td></tr>`;
   tbody.querySelectorAll("tr[data-sym]").forEach(tr=>{
     tr.onclick = ()=> selectSymbol(tr.getAttribute("data-sym"));
   });
@@ -694,14 +750,18 @@ els("hitsOnly").onchange = renderTable;
 function exportCsv(){
   const hitsOnly = els("hitsOnly").checked;
   const symbols = sortSymbols(Object.keys(results));
-  const rows = [["Symbol","Price","Chg%","EMA5>13","EMA13>34","Bullish","MagicTrend","Match"]];
+  const rows = [["Symbol","4H Trend","4H Bars","1D Trend","1D Bars"]];
   for(const sym of symbols){
     const r = results[sym];
-    if(!r || !r.flags) continue;
-    const f = r.flags;
-    const isMatch = matchFromFlags(f);
-    if(hitsOnly && !isMatch) continue;
-    rows.push([sym, f.price.toFixed(2), f.chg.toFixed(2), f.ema5gt13, f.ema13gt34, f.bullish, f.magicGreen, isMatch]);
+    if(!r || (!r.trend4h && !r.trend1d)) continue;
+    if(hitsOnly && !(r.flags && matchFromFlags(r.flags))) continue;
+    rows.push([
+      sym,
+      r.trend4h ? r.trend4h.dir : "",
+      r.trend4h ? r.trend4h.bars : "",
+      r.trend1d ? r.trend1d.dir : "",
+      r.trend1d ? r.trend1d.bars : ""
+    ]);
   }
   const csv = rows.map(r => r.join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -716,19 +776,63 @@ function exportCsv(){
 }
 els("exportCsvBtn").onclick = exportCsv;
 
+// Fetches/caches/computes indicators for one timeframe across all watchlist
+// symbols, using the same "only fetch what's newer than the cache" delta
+// logic as before. Returns { sym -> {ind, trend} | null }.
+async function scanTimeframe(timeframe, symbols, progressCb){
+  const cache = barCaches[timeframe] || (barCaches[timeframe] = { bars: {} });
+  const { start, end } = dateRangeFor(timeframe);
+
+  const fullSymbols = [];
+  const incGroups = {}; // incremental start ISO -> [symbols]
+  for(const sym of symbols){
+    const cached = cache.bars[sym];
+    if(cached && cached.length){
+      const lastMs = new Date(cached[cached.length-1].t).getTime();
+      const fromIso = new Date(lastMs + 1000).toISOString();
+      (incGroups[fromIso] = incGroups[fromIso] || []).push(sym);
+    } else {
+      fullSymbols.push(sym);
+    }
+  }
+
+  const barsMap = {};
+  if(fullSymbols.length){
+    Object.assign(barsMap, await fetchMultiBars(fullSymbols, start, end, timeframe, progressCb));
+  }
+  for(const fromIso of Object.keys(incGroups)){
+    const groupSymbols = incGroups[fromIso];
+    Object.assign(barsMap, await fetchMultiBars(groupSymbols, fromIso, end, timeframe, progressCb));
+  }
+
+  const tfResults = {};
+  for(const sym of symbols){
+    const cachedBars = cache.bars[sym] || [];
+    const freshBars = barsMap[sym] || [];
+    let merged = fullSymbols.includes(sym) ? freshBars : mergeBars(cachedBars, freshBars);
+    merged = trimBarsToRange(merged, start);
+    cache.bars[sym] = merged;
+
+    let raw = merged;
+    if(timeframe !== "1Day") raw = raw.filter(b => isRegularSessionBar(b.t));
+    if(raw.length < 60){ tfResults[sym] = null; continue; }
+    const ind = computeIndicators(raw, cfg.params);
+    tfResults[sym] = { ind, trend: trendBarsSinceChange(ind) };
+  }
+
+  // Drop cached symbols that fell off the watchlist so the cache doesn't
+  // grow forever as the watchlist changes.
+  Object.keys(cache.bars).forEach(sym => { if(!symbols.includes(sym)) delete cache.bars[sym]; });
+
+  return tfResults;
+}
+
 async function runScan(opts){
   opts = opts || {};
   const silent = !!opts.silent;
   if(!cfg.apiKey || !cfg.apiSecret){ if(!silent) openSettings(); return; }
   const symbols = parseWatchlist();
   if(!symbols.length) return;
-  const timeframe = cfg.timeframe;
-
-  // A cache built under a different feed/timeframe doesn't apply here -
-  // start clean rather than mixing bar granularities.
-  if(barCache.feed !== cfg.feed || barCache.timeframe !== timeframe){
-    barCache = { feed: cfg.feed, timeframe, bars: {} };
-  }
 
   if(!silent){
     els("scanBtn").disabled = true;
@@ -738,68 +842,41 @@ async function runScan(opts){
   els("status").textContent = silent ? "Refreshing…" : "Fetching bars…";
 
   try{
-    const { start, end } = dateRangeFor(timeframe);
-    const total = symbols.length;
-    let doneCount = 0;
-    // fetchMultiBars reports progress as a cumulative count *within its own
-    // call* (per 60-symbol chunk), so each call needs its own local
-    // baseline to turn that into a running total across the full scan.
-    function makeProgressHandler(){
+    // The watchlist needs both 4H and 1D bars every scan (for the two
+    // trend-bar columns), regardless of which timeframe is selected in the
+    // "tf" dropdown - that dropdown only picks the chart/match timeframe.
+    const total = TIMEFRAMES.length * symbols.length;
+    let doneUnits = 0;
+    const perTf = {};
+    for(const timeframe of TIMEFRAMES){
+      // fetchMultiBars reports progress as a cumulative count *within its
+      // own call* (per 60-symbol chunk), so each call needs its own local
+      // baseline to turn that into a running total across the full scan.
       let prevInCall = 0;
-      return (doneInCall)=>{
-        doneCount += (doneInCall - prevInCall);
+      const progressCb = (doneInCall)=>{
+        const overall = doneUnits + (doneInCall - prevInCall);
         prevInCall = doneInCall;
-        if(!silent) els("progressBar").style.width = Math.round((doneCount/total)*100)+"%";
-        els("status").textContent = `Fetched ${doneCount}/${total} symbols…`;
+        if(!silent) els("progressBar").style.width = Math.round((overall/total)*100)+"%";
+        els("status").textContent = `Fetched ${overall}/${total}…`;
       };
+      perTf[timeframe] = await scanTimeframe(timeframe, symbols, progressCb);
+      doneUnits += symbols.length;
     }
 
-    // Symbols we've never cached (or the cache came up empty for) need the
-    // full lookback window. Symbols we already have bars for only need
-    // whatever came after the newest cached bar - this is what turns a
-    // "Refresh" into a small delta fetch instead of re-downloading months of
-    // history every time.
-    const fullSymbols = [];
-    const incGroups = {}; // incremental start ISO -> [symbols]
-    for(const sym of symbols){
-      const cached = barCache.bars[sym];
-      if(cached && cached.length){
-        const lastMs = new Date(cached[cached.length-1].t).getTime();
-        const fromIso = new Date(lastMs + 1000).toISOString();
-        (incGroups[fromIso] = incGroups[fromIso] || []).push(sym);
-      } else {
-        fullSymbols.push(sym);
-      }
-    }
-
-    const barsMap = {};
-    if(fullSymbols.length){
-      Object.assign(barsMap, await fetchMultiBars(fullSymbols, start, end, timeframe, makeProgressHandler()));
-    }
-    for(const fromIso of Object.keys(incGroups)){
-      const groupSymbols = incGroups[fromIso];
-      Object.assign(barsMap, await fetchMultiBars(groupSymbols, fromIso, end, timeframe, makeProgressHandler()));
-    }
+    saveBarCaches(barCaches);
 
     results = {};
     for(const sym of symbols){
-      const cachedBars = barCache.bars[sym] || [];
-      const freshBars = barsMap[sym] || [];
-      let merged = fullSymbols.includes(sym) ? freshBars : mergeBars(cachedBars, freshBars);
-      merged = trimBarsToRange(merged, start);
-      barCache.bars[sym] = merged;
-
-      let raw = merged;
-      if(timeframe !== "1Day") raw = raw.filter(b => isRegularSessionBar(b.t));
-      if(raw.length < 60) { results[sym] = { ind:null, flags:null }; continue; }
-      const ind = computeIndicators(raw, cfg.params);
-      results[sym] = { ind, flags: screenerFlags(ind) };
+      const r4h = perTf["4Hour"][sym];
+      const r1d = perTf["1Day"][sym];
+      const active = perTf[cfg.timeframe][sym]; // drives the chart + match conditions
+      results[sym] = {
+        ind: active ? active.ind : null,
+        flags: active ? screenerFlags(active.ind) : null,
+        trend4h: r4h ? r4h.trend : null,
+        trend1d: r1d ? r1d.trend : null
+      };
     }
-
-    // Drop cached symbols that fell off the watchlist so the cache doesn't
-    // grow forever as the watchlist changes.
-    Object.keys(barCache.bars).forEach(sym => { if(!symbols.includes(sym)) delete barCache.bars[sym]; });
-    saveBarCache(barCache);
 
     checkForNewHits();
     renderTable();
@@ -1304,14 +1381,21 @@ function hydrateFromCache(){
   let any = false;
   results = {};
   for(const sym of symbols){
-    const cached = barCache.bars[sym];
-    if(!cached || !cached.length){ results[sym] = { ind:null, flags:null }; continue; }
-    let raw = cached;
-    if(cfg.timeframe !== "1Day") raw = raw.filter(b => isRegularSessionBar(b.t));
-    if(raw.length < 60){ results[sym] = { ind:null, flags:null }; continue; }
-    results[sym] = { ind: computeIndicators(raw, cfg.params), flags: null };
-    results[sym].flags = screenerFlags(results[sym].ind);
-    any = true;
+    const entry = { ind: null, flags: null, trend4h: null, trend1d: null };
+    for(const timeframe of TIMEFRAMES){
+      const cache = barCaches[timeframe];
+      const cached = cache && cache.bars[sym];
+      if(!cached || !cached.length) continue;
+      let raw = cached;
+      if(timeframe !== "1Day") raw = raw.filter(b => isRegularSessionBar(b.t));
+      if(raw.length < 60) continue;
+      const ind = computeIndicators(raw, cfg.params);
+      const trend = trendBarsSinceChange(ind);
+      if(timeframe === "4Hour") entry.trend4h = trend; else entry.trend1d = trend;
+      if(timeframe === cfg.timeframe){ entry.ind = ind; entry.flags = screenerFlags(ind); }
+      any = true;
+    }
+    results[sym] = entry;
   }
   if(any){
     renderTable();
