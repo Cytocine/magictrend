@@ -193,6 +193,13 @@
             <button class="icon-btn" id="toolFree" title="Freehand Pen">✏ Pen</button>
             <button class="icon-btn" id="clearDrawings" title="Clear Canvas Drawings">🗑 Clear</button>
             <button class="icon-btn" id="exportBtn" style="color:var(--cyan);font-weight:600;">📷 Export Chart</button>
+            <button class="icon-btn" id="playPauseBtn" title="Auto-cycle through charts">▶ Play</button>
+            <select id="playInterval" title="Time between charts">
+              <option value="2">2s</option>
+              <option value="3" selected>3s</option>
+              <option value="5">5s</option>
+              <option value="10">10s</option>
+            </select>
           </div>
 
           <div class="legend">
@@ -742,7 +749,7 @@ function renderTable(){
   }
   tbody.innerHTML = rows || `<tr><td colspan="3" class="empty">No hits.</td></tr>`;
   tbody.querySelectorAll("tr[data-sym]").forEach(tr=>{
-    tr.onclick = ()=> selectSymbol(tr.getAttribute("data-sym"));
+    tr.onclick = ()=>{ stopPlay(); selectSymbol(tr.getAttribute("data-sym")); };
   });
 }
 els("hitsOnly").onchange = renderTable;
@@ -1305,9 +1312,45 @@ function selectSymbol(sym){
 }
 
 els("closeChart").onclick = ()=>{
+  stopPlay();
   els("chartPanel").classList.remove("open");
   els("chartPlaceholder").style.display = "block";
 };
+
+// Play/Pause: auto-cycles the open chart through the watchlist (in the same
+// order currently shown in the table), advancing one symbol per interval
+// tick. Any manual row click or closing the chart stops playback.
+let playTimer = null;
+let isPlaying = false;
+function getSymbolOrder(){
+  return sortSymbols(Object.keys(results));
+}
+function advanceChart(step){
+  const order = getSymbolOrder();
+  if(!order.length) return;
+  let idx = order.indexOf(selectedSymbol);
+  idx = idx === -1 ? 0 : (idx + step + order.length) % order.length;
+  selectSymbol(order[idx]);
+}
+function stopPlay(){
+  if(playTimer){ clearInterval(playTimer); playTimer = null; }
+  isPlaying = false;
+  els("playPauseBtn").textContent = "▶ Play";
+  els("playPauseBtn").classList.remove("active");
+}
+function startPlay(){
+  const order = getSymbolOrder();
+  if(order.length < 2) return;
+  if(!selectedSymbol) selectSymbol(order[0]);
+  isPlaying = true;
+  els("playPauseBtn").textContent = "⏸ Pause";
+  els("playPauseBtn").classList.add("active");
+  const ms = Math.max(1, parseInt(els("playInterval").value, 10) || 3) * 1000;
+  if(playTimer) clearInterval(playTimer);
+  playTimer = setInterval(()=> advanceChart(1), ms);
+}
+els("playPauseBtn").onclick = ()=> isPlaying ? stopPlay() : startPlay();
+els("playInterval").onchange = ()=>{ if(isPlaying) startPlay(); };
 
 // Auto-refresh: silently re-scans on an interval so the table/chart stay
 // current without needing a manual click. Uses the incremental-fetch path
