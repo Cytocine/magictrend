@@ -35,7 +35,7 @@
   .chart-placeholder{background:var(--panel);border:1px dashed var(--border);border-radius:10px;padding:60px 20px;text-align:center;color:var(--dim);font-size:14px;}
   @media (max-width:900px){
     .layout{flex-direction:column;}
-    .sidebar{flex:0 0 auto;max-width:none;width:100%;max-height:55vh;}
+    .sidebar{display:none !important;}
   }
   .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
   .toolbar-more{display:contents;}
@@ -146,7 +146,7 @@
           <option value="1Day">1D</option>
         </select>
       </label>
-      <label><input type="checkbox" id="hitsOnly"> Hits only</label>
+      <label><input type="checkbox" id="hitsOnly" checked> Hits only</label>
       <label><input type="checkbox" id="autoRefresh"> Auto-refresh
         <select id="autoRefreshInterval">
           <option value="1">1m</option>
@@ -178,7 +178,7 @@
     </aside>
 
     <section class="chart-col">
-      <div id="chartPlaceholder" class="chart-placeholder">Select a symbol from the list to view its chart</div>
+      <div id="chartPlaceholder" class="chart-placeholder">Select a symbol or run scan to view charts</div>
       <div id="chartPanel">
         <div id="chartHeader">
           <span class="sym" id="chartSym">—</span>
@@ -327,6 +327,7 @@ let cfg = Object.assign({
   apiKey: "", apiSecret: "", feed: "iex", timeframe: "4Hour",
   watchlist: "AA, AAL, ABBV, ABT, ACB, ACN, ADBE, ADSK, AFRM, AGNC, ALHC, AMD, AMZN, APP, ARM, ASPI, ASTS, AVDL, AXON, B, BA, BABA, BAC, BAM, BE, BMY, BULL, C, CARR, CAVA, CC, CCJ, CCL, CELH, CHWY, CLMT, CLOV, CLSK, CMG, CNQ, CORZ, COST, COTY, CPNG, CRM, CRML, CRWD, CRWV, CVNA, CVS, DAR, DBX, DELL, DJT, DKNG, DOW, EBAY, ENPH, ENR, EQX, EXE, F, FCX, FDX, FSLR, GILD, GILT, GM, GME, GOOG, GOOGL, HIMS, HOOD, HPE, HPQ, HUT, INTC, IQ, IREN, IWM, JBLU, JD, JMIA, JNJ, JPM, KHC, KMI, KO, KSS, LLY, LOW, LULU, LUV, LVS, LYFT, MARA, MBLY, MBOT, META, MNDY, MO, MRK, MRVL, MSFT, MU, NEE, NEXT, NFLX, NIO, NKE, NU, NVDA, ONDS, OPEN, OWL, OXY, PBR, PCG, PDD, PEP, PFE, PG, PGEN, PINS, PLTR, PSKY, QBTS, QCOM, QD, QQQ, QS, RELY, RGTI, RIOT, RIVN, RKT, ROKU, RTX, SATS, SBUX, SERV, SLV, SMCI, SNAP, SOFI, SOUN, SPY, T, TCOM, TDOC, TEVA, TGT, TIGR, TMUS, TNA, TRMD, TSLA, TTD, U, UAL, UBER, UPS, UPST, VALE, VZ, WDC, WMT, WULF, XLE, XLF, XOM, XPEV, Z",
   matchMode: "all",
+  hitsOnly: true,
   autoRefresh: false, autoRefreshMinutes: 5, notifyOnHits: false,
   conditions: Object.assign({}, DEFAULT_CONDITIONS),
   params: Object.assign({}, DEFAULT_PARAMS)
@@ -483,7 +484,6 @@ async function fetchMultiBars(symbols, start, end, timeframe, onProgress){
       }
       pageToken = json.next_page_token || null;
 
-      // Small cooldown between requests to preserve API limits
       await sleep(350);
     } while(pageToken);
 
@@ -755,7 +755,11 @@ function renderTable(){
     tr.onclick = ()=>{ stopPlay(); selectSymbol(tr.getAttribute("data-sym")); };
   });
 }
-els("hitsOnly").onchange = renderTable;
+els("hitsOnly").onchange = ()=>{
+  cfg.hitsOnly = els("hitsOnly").checked;
+  saveCfg(cfg);
+  renderTable();
+};
 
 function exportCsv(){
   const hitsOnly = els("hitsOnly").checked;
@@ -880,9 +884,14 @@ async function runScan(opts){
 
     checkForNewHits();
     renderTable();
-    if(selectedSymbol && results[selectedSymbol] && results[selectedSymbol].ind){
+
+    const activeList = getSymbolOrder();
+    if(selectedSymbol && results[selectedSymbol] && results[selectedSymbol].ind && (!els("hitsOnly").checked || (results[selectedSymbol].flags && results[selectedSymbol].flags.signalWithin2Candles))){
       drawChart(selectedSymbol);
+    } else if(activeList.length > 0){
+      selectSymbol(activeList[0]);
     }
+
     els("status").textContent = `Scan complete · ${symbols.length} symbols · ${new Date().toLocaleTimeString()}`;
   }catch(err){
     console.error(err);
@@ -1273,7 +1282,11 @@ els("closeChart").onclick = ()=>{
 let playTimer = null;
 let isPlaying = false;
 function getSymbolOrder(){
-  return sortSymbols(Object.keys(results));
+  let symbols = Object.keys(results);
+  if(els("hitsOnly").checked){
+    symbols = symbols.filter(sym => results[sym] && results[sym].flags && results[sym].flags.signalWithin2Candles);
+  }
+  return sortSymbols(symbols);
 }
 function advanceChart(step){
   const order = getSymbolOrder();
@@ -1290,8 +1303,9 @@ function stopPlay(){
 }
 function startPlay(){
   const order = getSymbolOrder();
-  if(order.length < 2) return;
-  if(!selectedSymbol) selectSymbol(order[0]);
+  if(order.length < 1) return;
+  if(!selectedSymbol || !order.includes(selectedSymbol)) selectSymbol(order[0]);
+  if(order.length === 1) return;
   isPlaying = true;
   els("playPauseBtn").textContent = "⏸ Pause";
   els("playPauseBtn").classList.add("active");
@@ -1310,6 +1324,7 @@ function applyAutoRefresh(){
     autoRefreshTimer = setInterval(()=> runScan({ silent: true }), ms);
   }
 }
+els("hitsOnly").checked = cfg.hitsOnly !== undefined ? cfg.hitsOnly : true;
 els("autoRefresh").checked = cfg.autoRefresh;
 els("autoRefreshInterval").value = String(cfg.autoRefreshMinutes || 5);
 els("notifyOnHits").checked = cfg.notifyOnHits;
@@ -1383,6 +1398,11 @@ function hydrateFromCache(){
     lastMatchedSet = currentMatchedSymbols();
     hasCompletedAnyScan = true;
     els("status").textContent = "Showing cached results — refreshing…";
+    
+    const activeList = getSymbolOrder();
+    if(activeList.length > 0 && !selectedSymbol){
+      selectSymbol(activeList[0]);
+    }
   }
 }
 
