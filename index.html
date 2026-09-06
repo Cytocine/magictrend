@@ -139,12 +139,6 @@
 
     <div class="toolbar-more" id="toolbarMore">
       <button class="secondary" id="conditionsBtn">⚙ Conditions</button>
-      <label>Timeframe
-        <select id="tf">
-          <option value="4Hour" selected>4H</option>
-          <option value="1Day">1D</option>
-        </select>
-      </label>
       <label><input type="checkbox" id="hitsOnly" checked> Hits only</label>
       <label><input type="checkbox" id="autoRefresh"> Auto-refresh
         <select id="autoRefreshInterval">
@@ -167,11 +161,10 @@
           <tr>
             <th data-sort="symbol">Symbol</th>
             <th data-sort="bars4h">4H</th>
-            <th data-sort="bars1d">1D</th>
           </tr>
         </thead>
         <tbody id="tbody">
-          <tr><td colspan="3" class="empty">Set your Alpaca keys in Settings, then Run Scan.</td></tr>
+          <tr><td colspan="2" class="empty">Set your Alpaca keys in Settings, then Run Scan.</td></tr>
         </tbody>
       </table>
     </aside>
@@ -289,7 +282,7 @@ function loadCfg(){
 }
 function saveCfg(cfg){ localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }
 
-const TIMEFRAMES = ["4Hour", "1Day"];
+const TIMEFRAMES = ["4Hour"];
 
 const BAR_CACHE_KEY = "ripster_screener_barcache_v2";
 function loadBarCaches(){
@@ -340,13 +333,7 @@ let barCaches = loadBarCaches();
 const els = id => document.getElementById(id);
 const settingsModal = els("settingsModal");
 
-els("tf").value = cfg.timeframe;
-els("tf").onchange = ()=>{
-  cfg.timeframe = els("tf").value;
-  saveCfg(cfg);
-  updateStatus();
-};
-
+cfg.timeframe = "4Hour";
 function openSettings(){
   els("apiKey").value = cfg.apiKey;
   els("apiSecret").value = cfg.apiSecret;
@@ -373,9 +360,8 @@ els("saveSettings").onclick = ()=>{
   updateStatus();
 };
 function updateStatus(){
-  const tfLabel = cfg.timeframe === "1Day" ? "1D" : "4H";
   els("status").textContent = cfg.apiKey && cfg.apiSecret
-    ? `Connected · feed=${cfg.feed} · tf=${tfLabel} · ${parseWatchlist().length} symbols`
+    ? `Connected · feed=${cfg.feed} · tf=4H · ${parseWatchlist().length} symbols`
     : "Not connected — open Settings";
 }
 
@@ -441,13 +427,16 @@ function headers(){
 
 const sleep = ms => new Promise(res => setTimeout(res, ms));
 
-async function fetchMultiBars(symbols, start, end, timeframe, onProgress){
+async function fetchMultiBars(symbols, start, end, timeframe, onProgress, onStatus){
   const out = {};
   symbols.forEach(s=> out[s] = []);
   const CHUNK = 50;
+  const totalChunks = Math.ceil(symbols.length / CHUNK);
   for(let i=0; i<symbols.length; i+=CHUNK){
     const chunk = symbols.slice(i, i+CHUNK);
+    const chunkNum = Math.floor(i/CHUNK) + 1;
     let pageToken = null;
+    let page = 1;
     do{
       const params = new URLSearchParams({
         symbols: chunk.join(","),
@@ -459,6 +448,8 @@ async function fetchMultiBars(symbols, start, end, timeframe, onProgress){
       });
       if(pageToken) params.set("page_token", pageToken);
 
+      if(onStatus) onStatus(`${timeframe} · chunk ${chunkNum}/${totalChunks} (page ${page})…`);
+
       let res;
       let retries = 5;
       let delay = 2000;
@@ -468,6 +459,7 @@ async function fetchMultiBars(symbols, start, end, timeframe, onProgress){
 
         if(res.status === 429){
           console.warn(`Alpaca 429 hit. Pausing for ${delay / 1000}s before retry...`);
+          if(onStatus) onStatus(`${timeframe} · chunk ${chunkNum}/${totalChunks}: rate limited, retrying in ${delay/1000}s…`);
           await sleep(delay);
           delay *= 2;
           retries--;
@@ -487,6 +479,7 @@ async function fetchMultiBars(symbols, start, end, timeframe, onProgress){
         if(bars[sym]) out[sym] = out[sym].concat(bars[sym]);
       }
       pageToken = json.next_page_token || null;
+      page++;
 
       await sleep(350);
     } while(pageToken);
@@ -499,11 +492,7 @@ async function fetchMultiBars(symbols, start, end, timeframe, onProgress){
 function dateRangeFor(timeframe){
   const end = new Date();
   const start = new Date();
-  if(timeframe === "1Day"){
-    start.setFullYear(start.getFullYear() - 2);
-  } else {
-    start.setMonth(start.getMonth() - 6);
-  }
+  start.setMonth(start.getMonth() - 2);
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
@@ -711,7 +700,6 @@ function sortSymbols(symbols){
     const ra = results[a], rb = results[b];
     let va, vb;
     if(sortKey === "bars4h"){ va = ra && ra.trend4h ? ra.trend4h.bars : -Infinity; vb = rb && rb.trend4h ? rb.trend4h.bars : -Infinity; }
-    else if(sortKey === "bars1d"){ va = ra && ra.trend1d ? ra.trend1d.bars : -Infinity; vb = rb && rb.trend1d ? rb.trend1d.bars : -Infinity; }
     else { va = a; vb = b; }
     if(va < vb) return -1 * sortDir;
     if(va > vb) return 1 * sortDir;
@@ -748,23 +736,22 @@ function renderTable(){
   updateSortIndicators();
   const symbols = sortSymbols(Object.keys(results));
   if(!symbols.length){
-    tbody.innerHTML = `<tr><td colspan="3" class="empty">No results yet. Click Run Scan.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="2" class="empty">No results yet. Click Run Scan.</td></tr>`;
     return;
   }
   let rows = "";
   for(const sym of symbols){
     const r = results[sym];
-    if(!r || (!r.trend4h && !r.trend1d)) continue;
+    if(!r || !r.trend4h) continue;
     if(hitsOnly && !(r.flags && r.flags.signalWithin2Candles)) continue;
 
     const isHit = r.flags && r.flags.signalWithin2Candles;
     rows += `<tr data-sym="${sym}" class="${sym===selectedSymbol?'selected':''}">
       <td class="sym">${sym} ${isHit ? '<span class="pill match">⚡ Signal</span>' : ''}</td>
       <td>${trendCellHtml(r.trend4h)}</td>
-      <td>${trendCellHtml(r.trend1d)}</td>
     </tr>`;
   }
-  tbody.innerHTML = rows || `<tr><td colspan="3" class="empty">No hits.</td></tr>`;
+  tbody.innerHTML = rows || `<tr><td colspan="2" class="empty">No hits.</td></tr>`;
   tbody.querySelectorAll("tr[data-sym]").forEach(tr=>{
     tr.onclick = ()=>{ stopPlay(); selectSymbol(tr.getAttribute("data-sym")); };
   });
@@ -778,17 +765,15 @@ els("hitsOnly").onchange = ()=>{
 function exportCsv(){
   const hitsOnly = els("hitsOnly").checked;
   const symbols = sortSymbols(Object.keys(results));
-  const rows = [["Symbol","4H Trend","4H Bars","1D Trend","1D Bars","Signal Within 2 Bars"]];
+  const rows = [["Symbol","4H Trend","4H Bars","Signal Within 2 Bars"]];
   for(const sym of symbols){
     const r = results[sym];
-    if(!r || (!r.trend4h && !r.trend1d)) continue;
+    if(!r || !r.trend4h) continue;
     if(hitsOnly && !(r.flags && r.flags.signalWithin2Candles)) continue;
     rows.push([
       sym,
       r.trend4h ? r.trend4h.dir : "",
       r.trend4h ? r.trend4h.bars : "",
-      r.trend1d ? r.trend1d.dir : "",
-      r.trend1d ? r.trend1d.bars : "",
       (r.flags && r.flags.signalWithin2Candles) ? "YES" : "NO"
     ]);
   }
@@ -805,7 +790,7 @@ function exportCsv(){
 }
 els("exportCsvBtn").onclick = exportCsv;
 
-async function scanTimeframe(timeframe, symbols, progressCb){
+async function scanTimeframe(timeframe, symbols, progressCb, statusCb){
   const cache = barCaches[timeframe] || (barCaches[timeframe] = { bars: {} });
   const { start, end } = dateRangeFor(timeframe);
 
@@ -824,11 +809,11 @@ async function scanTimeframe(timeframe, symbols, progressCb){
 
   const barsMap = {};
   if(fullSymbols.length){
-    Object.assign(barsMap, await fetchMultiBars(fullSymbols, start, end, timeframe, progressCb));
+    Object.assign(barsMap, await fetchMultiBars(fullSymbols, start, end, timeframe, progressCb, statusCb));
   }
   for(const fromIso of Object.keys(incGroups)){
     const groupSymbols = incGroups[fromIso];
-    Object.assign(barsMap, await fetchMultiBars(groupSymbols, fromIso, end, timeframe, progressCb));
+    Object.assign(barsMap, await fetchMultiBars(groupSymbols, fromIso, end, timeframe, progressCb, statusCb));
   }
 
   const tfResults = {};
@@ -839,8 +824,7 @@ async function scanTimeframe(timeframe, symbols, progressCb){
     merged = trimBarsToRange(merged, start);
     cache.bars[sym] = merged;
 
-    let raw = merged;
-    if(timeframe !== "1Day") raw = raw.filter(b => isRegularSessionBar(b.t));
+    const raw = merged.filter(b => isRegularSessionBar(b.t));
     if(raw.length < 60){ tfResults[sym] = null; continue; }
     const ind = computeIndicators(raw, cfg.params);
     tfResults[sym] = { ind, trend: trendBarsSinceChange(ind) };
@@ -877,7 +861,7 @@ async function runScan(opts){
         if(!silent) els("progressBar").style.width = Math.round((overall/total)*100)+"%";
         els("status").textContent = `Fetched ${overall}/${total}…`;
       };
-      perTf[timeframe] = await scanTimeframe(timeframe, symbols, progressCb);
+      perTf[timeframe] = await scanTimeframe(timeframe, symbols, progressCb, (msg)=>{ els("status").textContent = msg; });
       doneUnits += symbols.length;
     }
 
@@ -885,14 +869,11 @@ async function runScan(opts){
 
     results = {};
     for(const sym of symbols){
-      const r4h = perTf["4Hour"][sym];
-      const r1d = perTf["1Day"][sym];
-      const active = perTf[cfg.timeframe][sym];
+      const active = perTf["4Hour"][sym];
       results[sym] = {
         ind: active ? active.ind : null,
         flags: active ? screenerFlags(active.ind) : null,
-        trend4h: r4h ? r4h.trend : null,
-        trend1d: r1d ? r1d.trend : null
+        trend4h: active ? active.trend : null
       };
     }
 
@@ -933,6 +914,11 @@ function ensureChart(){
     rightPriceScale: { borderColor:"#232c3a" },
     timeScale: { borderColor:"#232c3a", timeVisible:true, secondsVisible:false },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    watermark: {
+      visible: true, text: "", color: "rgba(230,237,243,0.10)",
+      fontSize: 42, fontFamily: "-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif",
+      horzAlign: "center", vertAlign: "center"
+    },
     autoSize: true
   });
   
@@ -1047,6 +1033,7 @@ function drawChart(symbol){
   candleSeries.setMarkers(markers);
 
   setInitialVisibleRange(ind);
+  chart.applyOptions({ watermark: { text: `${symbol} · 4H` } });
   els("chartSym").textContent = symbol;
   const last = ind.bars[n-1];
   els("chartPrice").textContent = `$${last.c.toFixed(2)}`;
@@ -1256,7 +1243,7 @@ els("exportBtn").onclick = ()=>{
 
   const dpr = window.devicePixelRatio || 1;
   const textSym = selectedSymbol;
-  const textTf = (cfg.timeframe === "1Day" ? "1D" : "4H") + " · Ripster Cloud";
+  const textTf = "4H · Ripster Cloud";
   const dateStr = new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
   ctx.save();
@@ -1276,7 +1263,7 @@ els("exportBtn").onclick = ()=>{
   ctx.restore();
 
   const link = document.createElement("a");
-  link.download = `${selectedSymbol}_${cfg.timeframe === "1Day" ? "1D" : "4H"}_Ripster_Cloud.png`;
+  link.download = `${selectedSymbol}_4H_Ripster_Cloud.png`;
   link.href = exportCanvas.toDataURL("image/png");
   link.click();
 };
@@ -1393,18 +1380,18 @@ function hydrateFromCache(){
   let any = false;
   results = {};
   for(const sym of symbols){
-    const entry = { ind: null, flags: null, trend4h: null, trend1d: null };
+    const entry = { ind: null, flags: null, trend4h: null };
     for(const timeframe of TIMEFRAMES){
       const cache = barCaches[timeframe];
       const cached = cache && cache.bars[sym];
       if(!cached || !cached.length) continue;
-      let raw = cached;
-      if(timeframe !== "1Day") raw = raw.filter(b => isRegularSessionBar(b.t));
+      const raw = cached.filter(b => isRegularSessionBar(b.t));
       if(raw.length < 60) continue;
       const ind = computeIndicators(raw, cfg.params);
       const trend = trendBarsSinceChange(ind);
-      if(timeframe === "4Hour") entry.trend4h = trend; else entry.trend1d = trend;
-      if(timeframe === cfg.timeframe){ entry.ind = ind; entry.flags = screenerFlags(ind); }
+      entry.trend4h = trend;
+      entry.ind = ind;
+      entry.flags = screenerFlags(ind);
       any = true;
     }
     results[sym] = entry;
