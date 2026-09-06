@@ -253,6 +253,7 @@
     <label class="checkrow"><input type="checkbox" id="condEma13gt34"> EMA13 &gt; EMA34</label>
     <label class="checkrow"><input type="checkbox" id="condBullish"> Bullish</label>
     <label class="checkrow"><input type="checkbox" id="condMagicGreen"> MagicTrend Green</label>
+    <label class="checkrow"><input type="checkbox" id="condTrendFlip"> MagicTrend Flip (line just turned green)</label>
 
     <label>MagicTrend parameters</label>
     <div class="row3">
@@ -321,7 +322,7 @@ const DEFAULT_PARAMS = {
   cciPeriod: 20, atrPeriodMT: 5, atrMultMT: 1,
   bullFastEma: 10, bullSlowEma: 21, rsiPeriod: 14, rsiThreshold: 50, cloudAtrFactor: 0.3
 };
-const DEFAULT_CONDITIONS = { ema5gt13: true, ema13gt34: true, bullish: true, magicGreen: true };
+const DEFAULT_CONDITIONS = { ema5gt13: true, ema13gt34: true, bullish: true, magicGreen: true, trendFlip: false };
 
 let cfg = Object.assign({
   apiKey: "", apiSecret: "", feed: "iex", timeframe: "4Hour",
@@ -384,6 +385,7 @@ function openConditions(){
   els("condEma13gt34").checked = cfg.conditions.ema13gt34;
   els("condBullish").checked = cfg.conditions.bullish;
   els("condMagicGreen").checked = cfg.conditions.magicGreen;
+  els("condTrendFlip").checked = cfg.conditions.trendFlip;
   els("pCciPeriod").value = cfg.params.cciPeriod;
   els("pAtrPeriodMT").value = cfg.params.atrPeriodMT;
   els("pAtrMultMT").value = cfg.params.atrMultMT;
@@ -402,7 +404,8 @@ els("applyConditions").onclick = ()=>{
     ema5gt13: els("condEma5gt13").checked,
     ema13gt34: els("condEma13gt34").checked,
     bullish: els("condBullish").checked,
-    magicGreen: els("condMagicGreen").checked
+    magicGreen: els("condMagicGreen").checked,
+    trendFlip: els("condTrendFlip").checked
   };
   const num = (id, fallback) => {
     const v = parseFloat(els(id).value);
@@ -628,7 +631,15 @@ function computeIndicators(rawBars, params){
     magicGreen[i] = cci[i] >= 0 && bullish[i] && (closes[i] > magicTrend[i]);
   }
 
-  return { bars, ema5, ema13, ema34, ema50, bullish, magicTrend, magicGreen, cci };
+  // Raw MagicTrend color flip: the bar where the trend line switches from red (cci<0) to green (cci>=0).
+  // This is the bare "line just turned green" moment (e.g. the CRM chart flip), independent of the
+  // stricter magicGreen filter (which also requires the bullish PVT/RSI/cloud confirmation).
+  const trendFlipBull = new Array(n).fill(false);
+  for(let i=1;i<n;i++){
+    trendFlipBull[i] = cci[i] >= 0 && cci[i-1] < 0;
+  }
+
+  return { bars, ema5, ema13, ema34, ema50, bullish, magicTrend, magicGreen, trendFlipBull, cci };
 }
 
 function trendBarsSinceChange(ind){
@@ -655,7 +666,8 @@ function isMatchAtBar(ind, i){
     ema5gt13: ind.ema5[i] > ind.ema13[i],
     ema13gt34: ind.ema13[i] > ind.ema34[i],
     bullish: ind.bullish[i],
-    magicGreen: ind.magicGreen[i]
+    magicGreen: ind.magicGreen[i],
+    trendFlip: ind.trendFlipBull[i]
   });
 }
 
@@ -683,6 +695,7 @@ function screenerFlags(ind){
     ema13gt34: ind.ema13[i] > ind.ema34[i],
     bullish: ind.bullish[i],
     magicGreen: ind.magicGreen[i],
+    trendFlip: ind.trendFlipBull[i],
     signalWithin2Candles
   };
 }
