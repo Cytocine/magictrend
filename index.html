@@ -30,12 +30,11 @@
   .icon-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
   main{padding:12px;max-width:1600px;margin:0 auto;}
   .layout{display:flex;gap:14px;align-items:flex-start;}
-  .sidebar{flex:0 0 320px;max-width:320px;max-height:calc(100vh - 200px);overflow:auto;border-radius:10px;}
+  .sidebar{display:none !important;}
   .chart-col{flex:1;min-width:0;}
   .chart-placeholder{background:var(--panel);border:1px dashed var(--border);border-radius:10px;padding:60px 20px;text-align:center;color:var(--dim);font-size:14px;}
   @media (max-width:900px){
     .layout{flex-direction:column;}
-    .sidebar{display:none !important;}
   }
   .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
   .toolbar-more{display:contents;}
@@ -191,7 +190,9 @@
             <button class="icon-btn" id="toolFree" title="Freehand Pen">✏ Pen</button>
             <button class="icon-btn" id="clearDrawings" title="Clear Canvas Drawings">🗑 Clear</button>
             <button class="icon-btn" id="exportBtn" style="color:var(--cyan);font-weight:600;">📷 Export Chart</button>
+            <button class="icon-btn" id="prevChartBtn" title="Previous symbol">⏮</button>
             <button class="icon-btn" id="playPauseBtn" title="Auto-cycle through charts">▶ Play</button>
+            <button class="icon-btn" id="nextChartBtn" title="Next symbol">⏭</button>
             <select id="playInterval" title="Time between charts">
               <option value="2">2s</option>
               <option value="3" selected>3s</option>
@@ -322,7 +323,7 @@ const DEFAULT_PARAMS = {
   cciPeriod: 20, atrPeriodMT: 5, atrMultMT: 1,
   bullFastEma: 10, bullSlowEma: 21, rsiPeriod: 14, rsiThreshold: 50, cloudAtrFactor: 0.3
 };
-const DEFAULT_CONDITIONS = { ema5gt13: true, ema13gt34: true, bullish: true, magicGreen: true, trendFlip: false };
+const DEFAULT_CONDITIONS = { ema5gt13: false, ema13gt34: false, bullish: false, magicGreen: true, trendFlip: false };
 
 let cfg = Object.assign({
   apiKey: "", apiSecret: "", feed: "iex", timeframe: "4Hour",
@@ -1328,6 +1329,8 @@ function startPlay(){
 }
 els("playPauseBtn").onclick = ()=> isPlaying ? stopPlay() : startPlay();
 els("playInterval").onchange = ()=>{ if(isPlaying) startPlay(); };
+els("prevChartBtn").onclick = ()=>{ stopPlay(); advanceChart(-1); };
+els("nextChartBtn").onclick = ()=>{ stopPlay(); advanceChart(1); };
 
 let autoRefreshTimer = null;
 function applyAutoRefresh(){
