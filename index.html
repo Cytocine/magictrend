@@ -1002,7 +1002,7 @@ function drawChart(symbol){
   const n = ind.bars.length;
 
   const candleData = ind.bars.map((b,i)=>{
-    const up = ind.magicGreen[i];
+    const up = b.c >= b.o;
     const color = up ? "#20d67b" : "#FC0400";
     return {
       time: toChartTime(b.t), open:b.o, high:b.h, low:b.l, close:b.c,
