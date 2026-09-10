@@ -795,30 +795,57 @@ async function scanTimeframe(timeframe, symbols, progressCb, statusCb){
   const { start, end } = dateRangeFor(timeframe);
 
   const fullSymbols = [];
-  const incGroups = {};
+  const incSymbols = [];
+  let minIncFromMs = null;
   for(const sym of symbols){
     const cached = cache.bars[sym];
     if(cached && cached.length){
       const lastMs = new Date(cached[cached.length-1].t).getTime();
-      const fromIso = new Date(lastMs + 1000).toISOString();
-      (incGroups[fromIso] = incGroups[fromIso] || []).push(sym);
+      if(minIncFromMs === null || lastMs < minIncFromMs) minIncFromMs = lastMs;
+      incSymbols.push(sym);
     } else {
       fullSymbols.push(sym);
     }
   }
 
   const barsMap = {};
+  const failedSymbols = new Set();
+
   if(fullSymbols.length){
-    Object.assign(barsMap, await fetchMultiBars(fullSymbols, start, end, timeframe, progressCb, statusCb));
+    try{
+      Object.assign(barsMap, await fetchMultiBars(fullSymbols, start, end, timeframe, progressCb, statusCb));
+    }catch(e){
+      console.error(`Full fetch failed for ${timeframe}:`, e);
+      if(statusCb) statusCb(`${timeframe}: full fetch failed (${e.message}) — keeping prior data where cached`);
+      fullSymbols.forEach(s => failedSymbols.add(s));
+    }
   }
-  for(const fromIso of Object.keys(incGroups)){
-    const groupSymbols = incGroups[fromIso];
-    Object.assign(barsMap, await fetchMultiBars(groupSymbols, fromIso, end, timeframe, progressCb, statusCb));
+  // One shared "from" date for every symbol needing a top-up, instead of a
+  // separate request per distinct last-bar timestamp — this is what was
+  // fragmenting a ~170-symbol scan into ~170 sequential HTTP calls.
+  if(incSymbols.length){
+    const fromIso = new Date(minIncFromMs + 1000).toISOString();
+    try{
+      Object.assign(barsMap, await fetchMultiBars(incSymbols, fromIso, end, timeframe, progressCb, statusCb));
+    }catch(e){
+      console.error(`Incremental fetch failed for ${timeframe}:`, e);
+      if(statusCb) statusCb(`${timeframe}: refresh failed (${e.message}) — keeping prior data`);
+      incSymbols.forEach(s => failedSymbols.add(s));
+    }
   }
 
   const tfResults = {};
   for(const sym of symbols){
     const cachedBars = cache.bars[sym] || [];
+    if(failedSymbols.has(sym) && !barsMap[sym]){
+      // This symbol's fetch errored out — fall back to whatever's already
+      // cached instead of dropping it (or the whole scan) entirely.
+      const raw = cachedBars.filter(b => isRegularSessionBar(b.t));
+      if(raw.length < 60){ tfResults[sym] = null; continue; }
+      const ind = computeIndicators(raw, cfg.params);
+      tfResults[sym] = { ind, trend: trendBarsSinceChange(ind) };
+      continue;
+    }
     const freshBars = barsMap[sym] || [];
     let merged = fullSymbols.includes(sym) ? freshBars : mergeBars(cachedBars, freshBars);
     merged = trimBarsToRange(merged, start);
@@ -834,6 +861,7 @@ async function scanTimeframe(timeframe, symbols, progressCb, statusCb){
 
   return tfResults;
 }
+
 
 async function runScan(opts){
   opts = opts || {};
